@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://api.github.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#2E5B4E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Колесо">
+<title>Колесо недели</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="styles.css">
+<style>
+html{color-scheme:light}
+body{margin:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);-webkit-tap-highlight-color:transparent}
+img{max-width:100%}[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="date">
+      <span class="label" id="hdr-week">Неделя</span>
+      <h1 id="hdr-date">Колесо недели</h1>
+    </div>
+    <nav class="tabs" aria-label="Разделы">
+      <a href="#today" data-tab="today">Сегодня</a>
+      <a href="#week" data-tab="week">Неделя</a>
+      <a href="#areas" data-tab="areas">Занятия</a>
+      <a href="#ideas" data-tab="ideas">Хотелки</a>
+      <a href="#method" data-tab="method">Метод</a>
+    </nav>
+  </header>
+  <main id="main"></main>
+  <footer class="foot">
+    <span id="store-note">Загружаю данные…</span>
+    <span>Колесо недели · блоки, темы дней, мини-шаги</span>
+  </footer>
+</div>
+<div id="overlay-root"></div>
+<script src="sync.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

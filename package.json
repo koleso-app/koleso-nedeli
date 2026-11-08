@@ -1,0 +1,52 @@
+{
+  "name": "koleso-nedeli",
+  "version": "1.1.0",
+  "description": "Колесо недели — личный планировщик свободного времени: таймер блоков, темы дней, мини-шаги.",
+  "main": "main.js",
+  "private": true,
+  "author": "Studio Yomigo",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "icons": "node scripts/make-icons.js",
+    "dist": "npm run assets && electron-builder --win nsis --x64",
+    "assets": "node scripts/make-icons.js && node scripts/copy-fonts.js",
+    "test": "node scripts/test-sync.js",
+    "web": "node scripts/serve.js"
+  },
+  "build": {
+    "appId": "com.yomigo.koleso-nedeli",
+    "productName": "Koleso Nedeli",
+    "executableName": "KolesoNedeli",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Колесо недели",
+      "uninstallDisplayName": "Колесо недели",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/onest": "^5.3.1",
+    "@fontsource/prata": "^5.3.0"
+  }
+}

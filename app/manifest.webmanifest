@@ -1,0 +1,17 @@
+{
+  "name": "Колесо недели",
+  "short_name": "Колесо",
+  "description": "Таймер блоков, темы дней, мини-шаги и рабочий режим.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F1F3EE",
+  "theme_color": "#2E5B4E",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
