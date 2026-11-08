@@ -78,7 +78,7 @@ function normalize(s){
       block: num(st.block, 45, 5, 240), maxExt: num(st.maxExt, 1, 0, 5), freeWeekday: num(st.freeWeekday, 3, 0, 24), freeWeekend: num(st.freeWeekend, 8, 0, 24),
       popup: st.popup !== false, mini: st.mini !== false, workAdded: !!st.workAdded, capsAdded: !!st.capsAdded,
       theme: ["dark", "light", "auto"].includes(st.theme) ? st.theme : "dark",
-      watch: String(st.watch ?? "Unity.exe, Godot*.exe").slice(0, 300),
+      watch: (st.watch === undefined || st.watch === "Unity.exe, Godot*.exe" ? "" : String(st.watch)).slice(0, 300),
       work: {
         on: sw.on !== false, days: (Array.isArray(sw.days) ? sw.days : [0,1,2,3,4]).map(Number).filter(d => d >= 0 && d <= 6),
         from: okTime(sw.from, "10:00"), to: okTime(sw.to, "19:00"), block: num(sw.block, 50, 10, 240), brk: num(sw.brk, 10, 3, 60),
@@ -654,7 +654,7 @@ function viewAreas(){
       <input class="input" id="nm-${a.id}" data-field="name" data-id="${a.id}" value="${esc(a.name)}" aria-label="Название">
       <div class="goal"><input class="input num" id="gl-${a.id}" type="number" min="0" max="80" step="0.5" data-field="goal" data-id="${a.id}" value="${a.goal}" aria-label="Цель, часов в неделю"><span class="small muted">ч/нед</span>${a.kind === "work" ? "" : `<input class="input num cap" id="cp-${a.id}" type="number" min="0" max="600" step="15" data-field="cap" data-id="${a.id}" value="${a.cap || ""}" placeholder="—" aria-label="Лимит, минут в день" title="Не больше стольких минут в день. Пусто — без лимита."><span class="small muted">мин/день макс</span>`}</div>
       ${a.kind === "work"
-        ? `<span class="mini-in small muted">Рабочие часы и задачи — в блоке «Рабочее время» ниже</span><span class="spacer"></span>`
+        ? `<span class="mini-in small muted">Рабочие часы — в <a href="#settings">настройках</a>, задачи — на «Сегодня»</span><span class="spacer"></span>`
         : `<input class="input mini-in" id="mi-${a.id}" data-field="mini" data-id="${a.id}" value="${esc(a.mini || "")}" placeholder="Мини-шаг на каждый день" aria-label="Мини-шаг">
            <button class="pill ${a.breakOk ? "on" : ""}" data-act="breakok" data-id="${a.id}" aria-pressed="${a.breakOk}" title="Можно ли делать в коротких перерывах между рабочими блоками">${a.breakOk ? "в перерыв: да" : "в перерыв: нет"}</button>`}
       <div class="acts">
@@ -664,14 +664,8 @@ function viewAreas(){
     </div>`).join("");
   return `<div class="stack">
     <section class="panel">
-      <div class="head"><h2>Бюджет свободного времени</h2></div>
-      <div class="settings">
-        <label>Свободных часов в будний день<input class="input num" id="set-wd" type="number" min="0" max="16" step="0.5" data-set="freeWeekday" value="${s.freeWeekday}"></label>
-        <label>Свободных часов в выходной<input class="input num" id="set-we" type="number" min="0" max="18" step="0.5" data-set="freeWeekend" value="${s.freeWeekend}"></label>
-        <label>Длина блока по умолчанию, мин<input class="input num" id="set-bl" type="number" min="10" max="180" step="5" data-set="block" value="${s.block}"></label>
-        <label>Сколько раз можно продлить блок<input class="input num" id="set-ex" type="number" min="0" max="5" step="1" data-set="maxExt" value="${s.maxExt}"></label>
-      </div>
-      <div class="budget" style="margin-top:16px" id="budget">
+      <div class="head"><h2>Бюджет свободного времени</h2><a class="small" href="#settings">Свободные часы — в настройках</a></div>
+      <div class="budget" id="budget">
         <div class="track">${track}</div>
         <p class="note ${over ? "" : "ok"}">${over
           ? `Цели хобби на неделю — <b class="num">${fmtH(goals)}</b>, а свободного времени — <b class="num">${fmtH(free)}</b>. Всё не влезет: уменьши цели или поставь что-то на паузу.`
@@ -684,6 +678,23 @@ function viewAreas(){
       <div class="areas">${rows || '<p class="muted">Пока нет ни одного занятия.</p>'}</div>
       <p class="small muted" style="margin-top:12px">Цель — сколько часов в неделю ты хочешь на это тратить. Лимит в день — потолок для затягивающих занятий: когда он набран, приложение предложит другое. «В перерыв: да» — занятие можно делать короткими подходами между рабочими блоками; затягивающие (игры, своя игра) лучше оставить на вечер. Пауза убирает занятие из колеса, история остаётся.</p>
     </section>
+  </div>`;
+}
+
+/* Settings tab */
+function viewSettings(){
+  const s = state.settings, w = s.work;
+  const hasWork = state.areas.some(a => a.kind === "work");
+  return `<div class="stack">
+    <section class="panel">
+      <div class="head"><h2>Таймер и свободное время</h2></div>
+      <div class="settings">
+        <label>Свободных часов в будний день<input class="input num" id="set-wd" type="number" min="0" max="16" step="0.5" data-set="freeWeekday" value="${s.freeWeekday}"></label>
+        <label>Свободных часов в выходной<input class="input num" id="set-we" type="number" min="0" max="18" step="0.5" data-set="freeWeekend" value="${s.freeWeekend}"></label>
+        <label>Длина блока по умолчанию, мин<input class="input num" id="set-bl" type="number" min="10" max="180" step="5" data-set="block" value="${s.block}"></label>
+        <label>Сколько раз можно продлить блок<input class="input num" id="set-ex" type="number" min="0" max="5" step="1" data-set="maxExt" value="${s.maxExt}"></label>
+      </div>
+    </section>
     ${hasWork ? `<section class="panel">
       <div class="head"><h2>Рабочее время</h2></div>
       <div class="stack" style="gap:12px">
@@ -695,8 +706,8 @@ function viewAreas(){
           <label>Рабочий блок, мин<input class="input num" id="w-block" type="number" min="15" max="180" step="5" data-wset="block" value="${w.block}"></label>
           <label>Перерыв между блоками, мин<input class="input num" id="w-brk" type="number" min="3" max="30" step="1" data-wset="brk" value="${w.brk}"></label>
         </div>
-        ${bridge ? `<label class="field">Программы-отвлечения в рабочее время<input class="input num" id="w-watch" data-sset="watch" value="${esc(s.watch)}" placeholder="Unity.exe, Godot*.exe" maxlength="300"></label>
-        <p class="small muted">Раз в минуту в рабочие часы программа проверяет, не открыто ли что-то из списка, и спрашивает, перерыв ли это. Имена — как в диспетчере задач, через запятую; * — любые символы. Список процессов никуда не отправляется.</p>` : ""}
+        ${bridge ? `<label class="field">Окна-отвлечения в рабочее время<input class="input" id="w-watch" data-sset="watch" value="${esc(s.watch)}" placeholder="например: MyGame, Dota2.exe" maxlength="300"></label>
+        <p class="small muted">Впиши название проекта своей игры — его видно в заголовке окна Unity. Тогда рабочие проекты в Unity не мешают, а окно своей игры в рабочие часы вызовет вопрос «это перерыв?». Можно добавить и программы целиком — с «.exe» на конце. Через запятую. Пусто — слежение выключено. Заголовки окон проверяются только на этом компьютере и никуда не отправляются.</p>` : ""}
       </div>
     </section>` : ""}
     <section class="panel">
@@ -840,7 +851,7 @@ function viewOverlay(){
     const a = guard.a ? areaById(guard.a) : null, wa = workArea();
     return `<div class="overlay" role="dialog" aria-modal="true" aria-labelledby="ov-h"><div class="card">
       <span class="label">Рабочее время до ${esc(W().to)}</span>
-      <h2 id="ov-h">${esc(guard.app)} открыт</h2>
+      <h2 id="ov-h">${/\.exe$/i.test(guard.app) ? esc(guard.app) + " открыт" : "Открыт проект «" + esc(guard.app) + "»"}</h2>
       <p>Это перерыв? Тогда пусть он будет на ${W().brk} минут — с таймером. Если программа нужна по работе, отметьте это, и сегодня я больше не спрошу.</p>
       <div class="btn-row">
         ${a ? `<button class="btn primary" data-act="start-ret" data-a="${a.id}">Перерыв: ${esc(a.name)} · ${W().brk} мин</button>` : ""}
@@ -918,7 +929,7 @@ function render(){
   $("#hdr-date").textContent = `${now.getDate()} ${MONTHS[now.getMonth()]}, ${DAYS_FULL[dayIdx(now)]}`;
   $("#hdr-week").textContent = "Неделя " + isoWeek(now);
   const h = (location.hash || "#today").slice(1);
-  tab = ["today","week","areas","ideas","method"].includes(h) ? h : "today";
+  tab = ["today","week","areas","ideas","method","settings"].includes(h) ? h : "today";
   document.querySelectorAll("nav.tabs a").forEach(a => { if (a.dataset.tab === tab) a.setAttribute("aria-current","page"); else a.removeAttribute("aria-current"); });
   const main = $("#main");
   if (loadFailed){
@@ -930,7 +941,7 @@ function render(){
   if (!state || !state.started){
     main.innerHTML = tab === "method" ? viewMethod() : viewOnboard();
   } else {
-    main.innerHTML = ({ today: viewToday, week: viewWeek, areas: viewAreas, ideas: viewIdeas, method: viewMethod })[tab]();
+    main.innerHTML = ({ today: viewToday, week: viewWeek, areas: viewAreas, ideas: viewIdeas, method: viewMethod, settings: viewSettings })[tab]();
   }
   $("#overlay-root").innerHTML = state ? viewOverlay() : "";
   renderFooter();
@@ -1115,10 +1126,10 @@ async function watchApps(){
   const tk = todayKey();
   found = found.filter(p => watchSnooze[p] !== tk);
   if (!found.length || guard || overlay) return;
-  const target = areaById("dev") || hobbies().find(a => !a.breakOk) || hobbies()[0];
+  const target = areaById("dev") || hobbies().find(a => !a.breakOk) || hobbies()[0];   // own game is the usual suspect
   guard = { why: "watch", app: found[0], a: target ? target.id : null };
   render();
-  bridge.notify({ title: "Рабочее время", body: `${found[0]} открыт. Это перерыв на ${W().brk} минут?`, popup: false, next: "" });
+  bridge.notify({ title: "Рабочее время", body: `${/\.exe$/i.test(found[0]) ? found[0] + " открыт" : "Открыт проект «" + found[0] + "»"}. Это перерыв на ${W().brk} минут?`, popup: false });
 }
 setInterval(watchApps, 60000);
 // re-render at midnight and when work hours start or end

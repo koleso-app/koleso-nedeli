@@ -31,4 +31,4 @@ npm run dist       # установщик в dist/
 Проверка без своих данных: `KOLESO_SMOKE=<папка> npx electron .` — скриншоты и отчёт в папку.
 
 Версия для телефона — это папка `app/`; при пуше в `main` её публикует GitHub Pages
-(`.github/workflows/pages.yml`).
+(`.github/workflows/pages.yml`). Адрес: https://koleso-app.github.io/koleso-nedeli/

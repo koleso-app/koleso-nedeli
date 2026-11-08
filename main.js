@@ -111,16 +111,21 @@ ipcMain.handle("secret:set", (_e, cfg) => {
   return true;
 });
 
-/* ---------- which of the given programs are running (work-hours check); nothing leaves the PC ---------- */
+/* ---------- work-hours check: which watched windows are open; nothing leaves the PC ----------
+ * An entry ending in ".exe" matches a program name (* = any characters);
+ * any other entry is looked for in window titles, e.g. a Unity project name. */
+const WINDOWS_PS = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { $_.ProcessName + '.exe' + [char]9 + $_.MainWindowTitle }";
 ipcMain.handle("apps:running", (_e, pats) => new Promise(resolve => {
-  const list = (Array.isArray(pats) ? pats : []).map(String).map(p => p.trim())
-    .filter(p => /^[\w .*()+-]{1,60}$/.test(p))
-    .map(p => ({ p, re: new RegExp("^" + p.replace(/[.+()]/g, "\\$&").replace(/\*/g, ".*") + "$", "i") }));
+  const list = (Array.isArray(pats) ? pats : []).map(String).map(p => p.trim()).filter(p => p.length >= 2 && p.length <= 60 && !/["\r\n\t]/.test(p));
   if (!list.length) return resolve([]);
-  execFile("tasklist", ["/FO", "CSV", "/NH"], { windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, (err, out) => {
+  execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_PS], { windowsHide: true, timeout: 20000, maxBuffer: 8 * 1024 * 1024 }, (err, out) => {
     if (err) return resolve([]);
-    const names = String(out).split(/\r?\n/).map(l => (l.match(/^"([^"]+)"/) || [])[1]).filter(Boolean);
-    resolve(list.filter(({ re }) => names.some(n => re.test(n))).map(({ p }) => p));
+    const wins = String(out).split(/\r?\n/).filter(Boolean).map(l => { const i = l.indexOf("\t"); return { exe: l.slice(0, i), title: l.slice(i + 1).toLowerCase() }; });
+    const hit = p => {
+      if (/\.exe$/i.test(p)) { const re = new RegExp("^" + p.replace(/[.+()[\]{}^$|?\\]/g, "\\$&").replace(/\*/g, ".*") + "$", "i"); return wins.some(w => re.test(w.exe)); }
+      const q = p.toLowerCase(); return wins.some(w => w.title.includes(q));
+    };
+    resolve(list.filter(hit));
   });
 }));
 ipcMain.on("shell:prefs", (_e, p) => {
@@ -264,6 +269,7 @@ async function runSmoke() {
     await js(`document.querySelector('[data-act="start"]').click()`); await wait(1500); await shot("3-timer.png");
     await js(`location.hash = "#week"`); await wait(500); await shot("4-week.png");
     await js(`location.hash = "#areas"`); await wait(500); await shot("5-areas.png");
+    await js(`location.hash = "#settings"`); await wait(500); await shot("5b-settings.png");
     win.hide(); await wait(1500);
     if (mini) fs.writeFileSync(path.join(SMOKE, "6-mini.png"), (await mini.webContents.capturePage()).toPNG());
     win.show(); await wait(500);
