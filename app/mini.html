@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'">
+<title>Колесо недели — таймер</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+:root{--bg:#1A2027;--ink:#E7EAE4;--muted:#9BA4AE;--line:#2B333C;--done:#B8691C;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font:13px/1.25 "Onest","Segoe UI",system-ui,sans-serif;user-select:none}
+.pill{position:relative;height:100%;display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:0 8px 0 16px;border:1px solid var(--line);-webkit-app-region:drag}
+.stripe{position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--c,#7A8794)}
+.txt{min-width:0}
+.name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.time{font-family:"JetBrains Mono",Consolas,monospace;font-weight:700;font-size:21px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.btns{display:flex;gap:4px;-webkit-app-region:no-drag}
+button{width:26px;height:26px;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:7px;cursor:pointer;display:grid;place-items:center;padding:0}
+button:hover{background:#2B333C}
+button:focus-visible{outline:2px solid #86C2AC;outline-offset:1px}
+.prog{position:absolute;left:6px;right:0;bottom:0;height:3px;background:var(--line)}
+.prog i{display:block;height:100%;width:0;background:var(--c,#7A8794);transition:width 1s linear}
+.done{background:var(--done);border-color:var(--done)}
+.done .sub{color:#FBE9D6}
+.done .stripe,.done .prog{display:none}
+.done{padding-left:12px}
+.done button{border-color:rgba(255,255,255,.4)}
+.done button:hover{background:rgba(255,255,255,.15)}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion: reduce){.prog i{transition:none}}
+</style>
+</head>
+<body>
+<div class="pill" id="pill">
+  <i class="stripe" aria-hidden="true"></i>
+  <div class="txt"><div class="name" id="name">Колесо недели</div><div class="sub" id="sub"></div></div>
+  <div class="time" id="time" aria-live="off"></div>
+  <div class="btns">
+    <button id="b-stop" title="Завершить и записать" aria-label="Завершить и записать"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg></button>
+    <button id="b-dismiss" title="Скрыть" aria-label="Скрыть" hidden><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    <button id="b-open" title="Открыть Колесо недели" aria-label="Открыть Колесо недели"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 1.5h6v6M10.5 1.5L4 8M8.5 7.5v3h-7v-7h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  </div>
+  <div class="prog" aria-hidden="true"><i id="bar"></i></div>
+</div>
+<script src="mini.js"></script>
+</body>
+</html>

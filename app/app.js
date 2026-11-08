@@ -32,47 +32,74 @@ function starter(){
     ["en","Английский","#3D8BD9",3,"15 минут: слова в приложении или эпизод подкаста",true],
     ["go","Го","#7A8794",2,"Один урок правил или 3 задачи-цумего",true],
     ["books","Книги","#E9B44C",3,"10 страниц",true],
-    ["games","Игры","#8E6CCF",3,"Одна сессия — до сигнала таймера",false],
+    ["games","Игры","#8E6CCF",0,"",false,90],
     ["dev","Своя игра","#2A9D8F",4,"25 минут на одну маленькую задачу",false],
   ];
   return normalize({
     started: true,
-    areas: [WORK_AREA(), ...A.map(([id,name,color,goal,mini,breakOk]) => ({id,name,color,goal,mini,active:true,kind:"hobby",breakOk}))],
+    areas: [WORK_AREA(), ...A.map(([id,name,color,goal,mini,breakOk,cap]) => ({id,name,color,goal,mini,active:true,kind:"hobby",breakOk,cap:cap||0}))],
     theme: {0:["en","dev"],1:["go","books"],2:["en","dev"],3:["go","books"],4:["games","books"],5:["dev","games"],6:["books","go"]},
-    settings: { workAdded: true },
+    settings: { workAdded: true, capsAdded: true },
   });
 }
+// everything that comes from storage, sync or an imported file is checked before use
+const sid = v => String(v ?? "").replace(/[^\w.:-]/g, "_").slice(0, 48);
+const okColor = c => (/^#[0-9a-fA-F]{6}$/.test(String(c)) ? String(c) : COLORS[0]);
+const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+const okTime = (v, d) => (/^\d{2}:\d{2}$/.test(String(v)) ? String(v) : d);
+const okDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v));
+const arr = v => (Array.isArray(v) ? v : []);
+const stamps = o => Object.fromEntries(Object.entries(o && typeof o === "object" ? o : {}).filter(([k, v]) => typeof k === "string" && Number.isFinite(v)));
 function normalize(s){
-  s = s || {};
-  const areas = (Array.isArray(s.areas) ? s.areas : []).filter(a => a && a.id).map(a => ({
-    id: String(a.id), name: String(a.name ?? ""), color: a.color || COLORS[0], goal: Number(a.goal) || 0, mini: String(a.mini || ""),
-    active: a.active !== false, kind: a.kind === "work" ? "work" : "hobby",
+  s = s && typeof s === "object" ? s : {};
+  const areas = arr(s.areas).filter(a => a && a.id).map(a => ({
+    id: sid(a.id), name: String(a.name ?? "").slice(0, 120), color: okColor(a.color), goal: num(a.goal, 0, 0, 80), cap: num(a.cap, 0, 0, 1440),
+    mini: String(a.mini || "").slice(0, 120), active: a.active !== false, kind: a.kind === "work" ? "work" : "hobby",
     breakOk: typeof a.breakOk === "boolean" ? a.breakOk : (a.kind !== "work" && !/игр/i.test(a.name || "")),
   }));
-  const st = s.settings || {};
+  const st = s.settings && typeof s.settings === "object" ? s.settings : {};
+  const sw = st.work && typeof st.work === "object" ? st.work : {};
   const meta = s.meta && typeof s.meta === "object" ? s.meta : {};
+  const theme = {}; for (let i = 0; i < 7; i++) theme[i] = arr((s.theme || {})[i]).map(sid);
+  const checks = {};
+  for (const [d, list] of Object.entries(s.checks && typeof s.checks === "object" ? s.checks : {})) if (okDate(d)) checks[d] = arr(list).map(sid);
+  const t = s.timer && typeof s.timer === "object" && Number.isFinite(Number(s.timer.start)) ? s.timer : null;
   return {
     v: 2,
     started: !!s.started || areas.length > 0,
     areas,
-    theme: Object.assign({0:[],1:[],2:[],3:[],4:[],5:[],6:[]}, s.theme || {}),
-    logs: Array.isArray(s.logs) ? s.logs : [],
-    checks: s.checks && typeof s.checks === "object" ? s.checks : {},
-    ideas: Array.isArray(s.ideas) ? s.ideas : [],
-    tasks: Array.isArray(s.tasks) ? s.tasks : [],
-    off: Array.isArray(s.off) ? s.off : [],
-    settings: Object.assign({ block: 45, maxExt: 1, freeWeekday: 3, freeWeekend: 8, popup: true, workAdded: false }, st, {
-      work: Object.assign({ on: true, days: [0,1,2,3,4], from: "10:00", to: "19:00", block: 50, brk: 10 }, st.work || {}),
-    }),
-    timer: s.timer || null,
-    meta: { u: Object.assign({}, meta.u || {}), del: Object.assign({}, meta.del || {}) },
+    theme,
+    logs: arr(s.logs).filter(l => l && okDate(l.d)).map(l => ({ id: sid(l.id) || uid(), a: sid(l.a), d: l.d, m: num(l.m, 0, 0, 1440) })),
+    checks,
+    ideas: arr(s.ideas).filter(i => i && i.id).map(i => ({ id: sid(i.id), t: String(i.t ?? "").slice(0, 200) })),
+    tasks: arr(s.tasks).filter(k => k && k.id && okDate(k.d)).map(k => ({ id: sid(k.id), d: k.d, t: String(k.t ?? "").slice(0, 200), done: !!k.done })),
+    off: arr(s.off).filter(okDate),
+    settings: {
+      block: num(st.block, 45, 5, 240), maxExt: num(st.maxExt, 1, 0, 5), freeWeekday: num(st.freeWeekday, 3, 0, 24), freeWeekend: num(st.freeWeekend, 8, 0, 24),
+      popup: st.popup !== false, mini: st.mini !== false, workAdded: !!st.workAdded, capsAdded: !!st.capsAdded,
+      theme: ["dark", "light", "auto"].includes(st.theme) ? st.theme : "dark",
+      watch: String(st.watch ?? "Unity.exe, Godot*.exe").slice(0, 300),
+      work: {
+        on: sw.on !== false, days: (Array.isArray(sw.days) ? sw.days : [0,1,2,3,4]).map(Number).filter(d => d >= 0 && d <= 6),
+        from: okTime(sw.from, "10:00"), to: okTime(sw.to, "19:00"), block: num(sw.block, 50, 10, 240), brk: num(sw.brk, 10, 3, 60),
+      },
+    },
+    timer: t ? { a: t.a ? sid(t.a) : null, start: Number(t.start), dur: num(t.dur, 25, 1, 600), kind: t.kind === "break" ? "break" : "focus", ext: num(t.ext, 0, 0, 10), ret: !!t.ret } : null,
+    meta: { u: stamps(meta.u), del: stamps(meta.del) },
   };
 }
 // change stamps for sync (see sync.js)
-function touch(...keys){ const t = Date.now(); for (const k of keys) state.meta.u[k] = t; }
-function tomb(k){ state.meta.del[k] = Date.now(); delete state.meta.u[k]; }
+let clockMax = 0;
+function noteStamps(st){ if (!st) return; for (const o of [st.meta.u, st.meta.del]) for (const v of Object.values(o)) if (v > clockMax) clockMax = v; }
+function stampNow(){ const t = Math.max(Date.now(), clockMax + 1); clockMax = t; return t; }
+function touch(...keys){ const t = stampNow(); for (const k of keys) state.meta.u[k] = t; }
+function touchAt(k, t){ state.meta.u[k] = Math.max(state.meta.u[k] || 0, t); }
+function tomb(k){ state.meta.del[k] = stampNow(); delete state.meta.u[k]; }
 function stampAll(){
-  const t = Date.now(), u = state.meta.u;
+  const t = stampNow(), u = state.meta.u;
+  for (const k of Object.keys(state.settings)) if (k !== "work") u["s:" + k] = t;
+  for (const k of Object.keys(state.settings.work)) u["s:work." + k] = t;
+  for (let d = 0; d < 7; d++) u["theme:" + d] = t;
   for (const a of state.areas) u["a:" + a.id] = t;
   for (const l of state.logs) u["l:" + l.id] = t;
   for (const i of state.ideas) u["i:" + i.id] = t;
@@ -84,22 +111,16 @@ function stampAll(){
 
 /* ---------- local storage: file (Windows app) or browser ---------- */
 const LS = "koleso-nedeli-v1", LS_SYNC = "koleso-sync";
-let state = null, ready = false, saveTimer = null, storeNote = "", dataPath = "", autostart = false;
+let state = null, ready = false, saveTimer = null, storeNote = "", dataPath = "", autostart = false, loadFailed = "", saveWarned = 0;
 function readLocal(){ try { const s = localStorage.getItem(LS); return s ? normalize(JSON.parse(s)) : null; } catch(e){ return null; } }
-function prune(){
-  const cutoff = key(addDays(new Date(), -200)), taskCut = key(addDays(new Date(), -60));
-  const goneLogs = state.logs.filter(l => l.d < cutoff);
-  state.logs = state.logs.filter(l => l.d >= cutoff);
-  for (const l of goneLogs) delete state.meta.u["l:" + l.id];
-  state.tasks = state.tasks.filter(t => { const keep = t.d >= taskCut; if (!keep) delete state.meta.u["k:" + t.id]; return keep; });
-  for (const k of Object.keys(state.checks)) if (k < cutoff || !state.checks[k].length) delete state.checks[k];
-  state.off = state.off.filter(d => d >= cutoff);
-  const tombCut = Date.now() - 200*864e5;
-  for (const [k, t] of Object.entries(state.meta.del)) if (t < tombCut) delete state.meta.del[k];
-}
+function prune(){ S.compact(state); }   // same rule as the merge, so pruned history never comes back
 function persist(){
   if (!state) return;
-  if (!bridge){ try { localStorage.setItem(LS, JSON.stringify(state)); } catch(e){} return; }
+  if (!bridge){
+    try { localStorage.setItem(LS, JSON.stringify(state)); }
+    catch(e){ if (Date.now() - saveWarned > 60000){ saveWarned = Date.now(); toast("Не удалось сохранить на этом устройстве: нет места или включён приватный режим. Скачайте резервную копию во вкладке «Занятия»."); } }
+    return;
+  }
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, 300);
 }
@@ -112,7 +133,7 @@ function save(){ if (!state) return; prune(); persist(); scheduleSync(); }
 window.addEventListener("beforeunload", () => { if (bridge && saveTimer && state){ clearTimeout(saveTimer); bridge.saveSync(JSON.stringify(state)); } });
 
 /* ---------- sync ---------- */
-let syncCfg = null, syncing = false, syncAgain = false, syncTimer = null;
+let syncCfg = null, syncing = false, syncAgain = false, syncTimer = null, syncPending = false, syncAttempted = false;
 let syncStatus = { state: "off", msg: "", at: 0 };
 async function loadSyncCfg(){
   if (bridge){ try { return await bridge.secretGet(); } catch(e){ return null; } }
@@ -122,12 +143,14 @@ async function storeSyncCfg(c){
   if (bridge) return bridge.secretSet(c);
   try { if (c) localStorage.setItem(LS_SYNC, JSON.stringify(c)); else localStorage.removeItem(LS_SYNC); } catch(e){}
 }
-function scheduleSync(){ if (!syncCfg) return; clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 4000); }
+function scheduleSync(){ if (!syncCfg) return; syncPending = true; clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 4000); }
+function syncSoon(){ if (!syncCfg) return; clearTimeout(syncTimer); syncNow(); }   // timer starts and stops reach other devices at once
 async function syncNow(cfg){
   const c = cfg || syncCfg;
   if (!S || !c) return false;
   if (syncing){ syncAgain = true; return false; }
-  syncing = true; syncStatus = Object.assign({}, syncStatus, { state: "busy" }); renderSyncStatus();
+  syncing = true; syncPending = false; clearTimeout(syncTimer);
+  syncStatus = Object.assign({}, syncStatus, { state: "busy" }); renderSyncStatus();
   let ok = false;
   try {
     for (let attempt = 0; attempt < 4; attempt++){
@@ -135,7 +158,7 @@ async function syncNow(cfg){
       const remote = env ? normalize(await S.open(env, c.pass)) : null;
       const merged = remote ? normalize(S.merge(state || normalize({}), remote)) : state;
       if (merged && stable(merged) !== stable(state)){
-        state = merged; persist(); if (!editingNow()) render(); syncTimerToShell();
+        state = merged; noteStamps(state); persist(); if (!editingNow()) render(); syncTimerToShell();
       }
       if (!state || (remote && stable(remote) === stable(state))) { ok = true; break; }
       const snapshot = JSON.parse(JSON.stringify(state));
@@ -145,7 +168,7 @@ async function syncNow(cfg){
   } catch(e){
     syncStatus = { state: "error", msg: (e && e.message) || String(e), at: syncStatus.at, code: e && e.code };
   }
-  syncing = false; renderSyncStatus();
+  syncing = false; syncAttempted = true; renderSyncStatus();
   if (syncAgain){ syncAgain = false; setTimeout(syncNow, 500); }
   return ok;
 }
@@ -158,18 +181,32 @@ async function boot(){
     try {
       const r = await bridge.load();
       dataPath = r.path || "";
-      state = r.data ? normalize(r.data) : null;
-      if (r.error) storeNote = "Файл данных был повреждён — сохранена его копия, начинаем заново. " + r.error;
-    } catch(e){ storeNote = "Не удалось прочитать файл данных: " + ((e && e.message) || e); }
+      if (r.readError) loadFailed = r.readError;
+      else {
+        state = r.data ? normalize(r.data) : null;
+        if (r.error) storeNote = "Файл данных был повреждён — сохранена его копия, начинаем заново. " + r.error;
+      }
+    } catch(e){ loadFailed = (e && e.message) || String(e); }
+    if (loadFailed){ ready = true; render(); return; }   // never offer a fresh start over data we could not read
     try { autostart = await bridge.getAutostart(); } catch(e){}
+    ensureAudio();   // so a block started on the phone can ring here without a click
+    bridge.onCommand(c => { if (c.type === "stop" && state && state.timer) stopTimer(false); });
   } else {
     state = readLocal();
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
   }
+  if (state) noteStamps(state);
   // add the work area once for people who started before work mode existed
   if (state && state.started && !state.settings.workAdded){
     if (!state.areas.some(a => a.kind === "work")){ state.areas.unshift(WORK_AREA()); touch("a:work", "order"); }
-    state.settings.workAdded = true; touch("settings"); save();
+    state.settings.workAdded = true; touch("s:workAdded"); save();
   }
+  // games get a daily cap instead of a weekly goal, once (it was pushing towards more gaming)
+  if (state && state.started && !state.settings.capsAdded){
+    for (const a of state.areas) if (a.kind !== "work" && /^игры$/i.test(a.name.trim()) && !a.cap){ a.cap = 90; a.goal = 0; a.mini = ""; touch("a:" + a.id); capsNote = true; }
+    state.settings.capsAdded = true; touch("s:capsAdded"); save();
+  }
+  if (state) applyTheme();
   syncCfg = await loadSyncCfg();
   ready = true;
   render(); tick(); syncTimerToShell();
@@ -181,7 +218,7 @@ function syncTimerToShell(){
   const t = state && state.timer;
   if (!t){ bridge.timer(null); return; }
   const a = t.a ? areaById(t.a) : null;
-  bridge.timer({ start: t.start, endsAt: t.start + t.dur*60000, label: t.kind === "break" ? "Перерыв" : (a ? a.name : "Занятие") });
+  bridge.timer({ start: t.start, endsAt: t.start + t.dur*60000, label: t.kind === "break" ? "Перерыв" : (a ? a.name : "Занятие"), color: t.kind === "break" ? "#7A8794" : (a ? a.color : "#7A8794") });
 }
 function editingNow(){ const a = document.activeElement; return a && a.closest && a.closest("#main, #overlay-root") && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName); }
 
@@ -195,7 +232,18 @@ const workArea = () => state.areas.find(a => a.kind === "work" && a.active);
 const W = () => state.settings.work;
 const isOff = d => state.off.includes(key(d));
 const isWorkday = d => !!(W().on && workArea() && W().days.includes(dayIdx(d)) && !isOff(d));
-function inWork(d){ d = d || today(); if (!isWorkday(d)) return false; const m = d.getHours()*60 + d.getMinutes(); return m >= hm(W().from) && m < hm(W().to); }
+function inWork(d){
+  d = d || new Date();
+  const f = hm(W().from), t = hm(W().to), m = d.getHours()*60 + d.getMinutes();
+  if (f < t) return isWorkday(d) && m >= f && m < t;
+  if (f === t) return false;
+  return (isWorkday(d) && m >= f) || (isWorkday(addDays(d, -1)) && m < t);   // a shift that crosses midnight
+}
+function todayMinutes(aid){
+  const tk = todayKey(), t = state.timer;
+  return state.logs.filter(l => l.d === tk && l.a === aid).reduce((s, l) => s + l.m, 0)
+    + (t && t.a === aid && t.kind === "focus" ? Math.floor((Date.now() - t.start) / 60000) : 0);
+}
 const tasksFor = d => state.tasks.filter(t => t.d === d);
 function weekRange(offset){ const s = addDays(weekStart(today()), offset*7); return { start: s, keys: [...Array(7)].map((_,i) => key(addDays(s,i))) }; }
 function minutesByArea(keys){ const set = new Set(keys), m = {}; for (const l of state.logs) if (set.has(l.d)) m[l.a] = (m[l.a]||0) + l.m; return m; }
@@ -225,6 +273,7 @@ function suggest(exclude, forBreak){
   for (const a of hobbies()){
     if (a.id === exclude || !(a.goal > 0)) continue;
     if (forBreak && !a.breakOk) continue;
+    if (a.cap > 0 && todayMinutes(a.id) >= a.cap) continue;
     const goalM = a.goal * 60, d = done[a.id] || 0;
     const expected = goalM * (t + 1) / 7;
     let score = expected - d;
@@ -246,7 +295,7 @@ function suggest(exclude, forBreak){
 }
 
 /* ---------- timer ---------- */
-let audioCtx = null, overlay = null, guard = null, finishing = false, wakeLock = null;
+let audioCtx = null, overlay = null, guard = null, finishing = false, wakeLock = null, lastFinish = null, capsNote = false;
 function ensureAudio(){ try { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume(); } catch(e){} }
 function beep(){
   if (!audioCtx) return;
@@ -260,48 +309,65 @@ function beep(){
     });
   } catch(e){}
 }
-function addLog(aid, m, d, id){
+function addLog(aid, m, d, id, at){
   if (!aid || m < 1) return;
   id = id || uid();
   if (state.logs.some(l => l.id === id)) return;
   state.logs.push({ id, a: aid, d: d || todayKey(), m: Math.round(m) });
-  touch("l:" + id);
+  if (at) touchAt("l:" + id, at); else touch("l:" + id);
 }
-// a hobby started during work hours goes through the guard first
-function requestStart(aid, dur){
-  const a = areaById(aid);
-  if (a && a.kind !== "work" && inWork()){ guard = { a: aid }; render(); return; }
+// starting a block goes through the guards: work hours, the daily cap, the same thing again right away
+function requestStart(aid, dur, force){
+  const a = areaById(aid); if (!a) return;
+  dur = Number(dur);
+  if (!force){
+    if (a.kind !== "work" && inWork()){ guard = { a: aid, why: "work" }; render(); return; }
+    if (a.cap > 0 && todayMinutes(aid) >= a.cap){ guard = { a: aid, why: "cap" }; render(); return; }
+    if (a.kind !== "work" && lastFinish && lastFinish.a === aid && Date.now() - lastFinish.at < 15*60000){ guard = { a: aid, why: "again", dur }; render(); return; }
+    if (a.cap > 0){ const left = a.cap - todayMinutes(aid); if (left < dur){ dur = Math.max(5, left); toast("Блок укорочен до дневного лимита: " + fmt(dur)); } }
+  }
   startTimer(aid, dur, "focus", 0, false);
 }
 function startTimer(aid, dur, kind, ext, ret){
   ensureAudio();
   if (state.timer) stopTimer(true);
   state.timer = { a: aid || null, start: Date.now(), dur: Number(dur), kind: kind || "focus", ext: ext || 0, ret: !!ret };
-  touch("timer"); overlay = null; guard = null; save(); render(); syncTimerToShell();
+  touch("timer"); overlay = null; guard = null; save(); render(); syncTimerToShell(); syncSoon();
 }
 function stopTimer(silent){
   const t = state.timer; if (!t) return;
   const mins = Math.min(t.dur, Math.floor((Date.now() - t.start) / 60000));
   if (t.kind === "focus") addLog(t.a, mins, key(new Date(t.start)), "t" + t.start);
   state.timer = null; touch("timer"); document.title = "Колесо недели";
-  if (!silent){ save(); render(); syncTimerToShell(); if (t.kind === "focus") toast(mins >= 1 ? "Записано: " + fmt(mins) : "Меньше минуты — не записываю"); }
+  if (!silent){ save(); render(); syncTimerToShell(); syncSoon(); if (t.kind === "focus") toast(mins >= 1 ? "Записано: " + fmt(mins) : "Меньше минуты — не записываю"); }
 }
 function finishTimer(){
   const t = state.timer; if (!t || finishing) return;
   finishing = true;
-  if (t.kind === "focus") addLog(t.a, t.dur, key(new Date(t.start)), "t" + t.start);
-  state.timer = null; touch("timer");
+  // stamp with the moment the block really ended, so a device that wakes up late
+  // cannot override a block started elsewhere since then
+  const end = t.start + t.dur*60000;
+  if (t.kind === "focus") addLog(t.a, t.dur, key(new Date(t.start)), "t" + t.start, end);
+  state.timer = null; touchAt("timer", end);
   const a = areaById(t.a);
+  const late = Date.now() - end > 90000;          // the app was closed when the timer ran out
+  const veryLate = Date.now() - end > 10*60000;
+  if (t.kind === "focus" && a && a.kind !== "work" && !t.ret) lastFinish = { a: t.a, at: end };
+  save(); syncTimerToShell(); syncSoon();
+  if (veryLate){
+    if (t.kind === "focus") toast(`Блок «${a ? a.name : "Занятие"}» закончился, пока приложение было закрыто — записано ${fmt(t.dur)}.`);
+    render(); finishing = false; return;
+  }
   overlay = { kind: t.kind, a: t.a, dur: t.dur, ext: t.ext, ret: t.ret, wasWork: !!(a && a.kind === "work") };
-  save(); beep(); render(); syncTimerToShell();
+  beep(); render();
   try { navigator.vibrate && navigator.vibrate([300, 150, 300]); } catch(e){}
   document.title = "Пора переключиться · Колесо недели";
-  const late = Date.now() - (t.start + t.dur*60000) > 90000;   // the app was closed when the timer ran out
   if (bridge && !late){
     const nx = nextAfter(overlay);
     bridge.notify({
       title: overlay.wasWork ? "Перерыв!" : (t.kind === "focus" ? "Пора переключиться" : "Перерыв окончен"),
       body: (t.kind === "focus" ? `«${a ? a.name : "Занятие"}» — ${fmt(t.dur)} записано.` : "Возвращаемся.") + (nx.main ? ` Дальше: ${nx.main.area.name}.` : ""),
+      next: nx.main ? nx.main.area.name : "",
       popup: !!state.settings.popup,
     });
   }
@@ -317,7 +383,11 @@ function nextAfter(o){
 function tick(){
   if (!state || !state.timer) return;
   const t = state.timer, total = t.dur * 60000, left = t.start + total - Date.now();
-  if (left <= 0){ finishTimer(); return; }
+  if (left <= 0){
+    // overdue while this device was asleep: ask the other devices first, they may have stopped it
+    if (syncCfg && !syncAttempted && -left > 90000){ if (!syncing) syncNow(); return; }
+    finishTimer(); return;
+  }
   const s = Math.ceil(left / 1000), el = $("#clock"), bar = $("#tbar");
   if (el) el.textContent = pad(Math.floor(s/60)) + ":" + pad(s % 60);
   if (bar) bar.style.width = (100 * (1 - left/total)).toFixed(2) + "%";
@@ -582,7 +652,7 @@ function viewAreas(){
   const rows = state.areas.map(a => `<div class="area ${a.active ? "" : "paused"} ${a.kind === "work" ? "is-work" : ""}" data-id="${a.id}">
       <button class="sw" style="background:${a.color}" data-act="color" data-id="${a.id}" aria-label="Сменить цвет: ${esc(a.name)}"></button>
       <input class="input" id="nm-${a.id}" data-field="name" data-id="${a.id}" value="${esc(a.name)}" aria-label="Название">
-      <div class="goal"><input class="input num" id="gl-${a.id}" type="number" min="0" max="80" step="0.5" data-field="goal" data-id="${a.id}" value="${a.goal}" aria-label="Цель, часов в неделю"><span class="small muted">ч/нед</span></div>
+      <div class="goal"><input class="input num" id="gl-${a.id}" type="number" min="0" max="80" step="0.5" data-field="goal" data-id="${a.id}" value="${a.goal}" aria-label="Цель, часов в неделю"><span class="small muted">ч/нед</span>${a.kind === "work" ? "" : `<input class="input num cap" id="cp-${a.id}" type="number" min="0" max="600" step="15" data-field="cap" data-id="${a.id}" value="${a.cap || ""}" placeholder="—" aria-label="Лимит, минут в день" title="Не больше стольких минут в день. Пусто — без лимита."><span class="small muted">мин/день макс</span>`}</div>
       ${a.kind === "work"
         ? `<span class="mini-in small muted">Рабочие часы и задачи — в блоке «Рабочее время» ниже</span><span class="spacer"></span>`
         : `<input class="input mini-in" id="mi-${a.id}" data-field="mini" data-id="${a.id}" value="${esc(a.mini || "")}" placeholder="Мини-шаг на каждый день" aria-label="Мини-шаг">
@@ -612,7 +682,7 @@ function viewAreas(){
     <section class="panel">
       <div class="head"><h2>Занятия</h2><div class="btn-row">${hasWork ? "" : '<button class="btn small" data-act="add-work">Добавить работу</button>'}<button class="btn small" data-act="add-area">Добавить занятие</button></div></div>
       <div class="areas">${rows || '<p class="muted">Пока нет ни одного занятия.</p>'}</div>
-      <p class="small muted" style="margin-top:12px">Цель — сколько часов в неделю ты хочешь на это тратить. «В перерыв: да» — занятие можно делать короткими подходами между рабочими блоками; затягивающие (игры, своя игра) лучше оставить на вечер. Пауза убирает занятие из колеса, история остаётся.</p>
+      <p class="small muted" style="margin-top:12px">Цель — сколько часов в неделю ты хочешь на это тратить. Лимит в день — потолок для затягивающих занятий: когда он набран, приложение предложит другое. «В перерыв: да» — занятие можно делать короткими подходами между рабочими блоками; затягивающие (игры, своя игра) лучше оставить на вечер. Пауза убирает занятие из колеса, история остаётся.</p>
     </section>
     ${hasWork ? `<section class="panel">
       <div class="head"><h2>Рабочее время</h2></div>
@@ -625,13 +695,20 @@ function viewAreas(){
           <label>Рабочий блок, мин<input class="input num" id="w-block" type="number" min="15" max="180" step="5" data-wset="block" value="${w.block}"></label>
           <label>Перерыв между блоками, мин<input class="input num" id="w-brk" type="number" min="3" max="30" step="1" data-wset="brk" value="${w.brk}"></label>
         </div>
+        ${bridge ? `<label class="field">Программы-отвлечения в рабочее время<input class="input num" id="w-watch" data-sset="watch" value="${esc(s.watch)}" placeholder="Unity.exe, Godot*.exe" maxlength="300"></label>
+        <p class="small muted">Раз в минуту в рабочие часы программа проверяет, не открыто ли что-то из списка, и спрашивает, перерыв ли это. Имена — как в диспетчере задач, через запятую; * — любые символы. Список процессов никуда не отправляется.</p>` : ""}
       </div>
     </section>` : ""}
+    <section class="panel">
+      <div class="head"><h2>Оформление</h2></div>
+      <div class="btn-row" role="group" aria-label="Тема">${[["dark","Тёмная"],["light","Светлая"],["auto","Как в системе"]].map(([v,l]) => `<button class="pill ${s.theme === v ? "on" : ""}" data-act="theme-set" data-v="${v}" aria-pressed="${s.theme === v}">${l}</button>`).join("")}</div>
+    </section>
     ${viewSync()}
     ${bridge ? `<section class="panel">
       <div class="head"><h2>Программа и данные</h2></div>
       <div class="stack" style="gap:10px">
-        <label class="toggle"><input type="checkbox" id="set-popup" data-flag="popup" ${s.popup ? "checked" : ""}> Когда блок закончился, показывать окно поверх остальных</label>
+        <label class="toggle"><input type="checkbox" id="set-mini" data-flag="mini" ${s.mini ? "checked" : ""}> Мини-таймер поверх окон, когда главное окно свёрнуто</label>
+        <label class="toggle"><input type="checkbox" id="set-popup" data-flag="popup" ${s.popup ? "checked" : ""}> Когда блок закончился, показывать главное окно (если мини-таймер выключен)</label>
         <label class="toggle"><input type="checkbox" id="set-auto" data-act="autostart" ${autostart ? "checked" : ""}> Запускать вместе с Windows (в трее, без окна)</label>
         <p class="small muted">Все данные лежат в файле на этом компьютере${dataPath ? `: <span class="num">${esc(dataPath)}</span>` : "."}</p>
         <div class="btn-row">
@@ -640,7 +717,15 @@ function viewAreas(){
           <button class="btn small ghost" data-act="open-folder">Открыть папку данных</button>
         </div>
       </div>
-    </section>` : ""}
+    </section>` : `<section class="panel">
+      <div class="head"><h2>Данные на этом устройстве</h2></div>
+      <p class="small muted">Данные лежат в памяти браузера на телефоне. Резервная копия — файл, который можно сохранить себе.</p>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn small" data-act="export-web">Скачать резервную копию</button>
+        <label class="btn small" for="import-file">Загрузить из копии…</label>
+        <input type="file" id="import-file" accept=".json,application/json" hidden>
+      </div>
+    </section>`}
   </div>`;
 }
 
@@ -672,7 +757,8 @@ function viewSyncBody(){
       <label>Имя на GitHub<input class="input" id="sy-owner" name="owner" required placeholder="например, PlayWithMao"></label>
       <label>Репозиторий<input class="input" id="sy-repo" name="repo" required value="koleso-data"></label>
       <label class="wide">Токен доступа<input class="input num" id="sy-token" name="token" type="password" required placeholder="github_pat_…"></label>
-      <label class="wide">Пароль шифрования<input class="input" id="sy-pass" name="pass" type="password" required minlength="8" placeholder="не меньше 8 символов"></label>
+      <label>Пароль шифрования<input class="input" id="sy-pass" name="pass" type="password" required minlength="8" placeholder="не меньше 8 символов"></label>
+      <label>Повторите пароль<input class="input" id="sy-pass2" name="pass2" type="password" placeholder="нужно на первом устройстве"></label>
       <p class="small muted wide">Запомни пароль: восстановить его нельзя, и без него данные не расшифровать. Токен и пароль хранятся только на этом устройстве${bridge ? " (зашифрованы средствами Windows)" : ""}.</p>
       <div class="wide"><button class="btn primary" type="submit" id="sy-go">Подключить</button> <span class="small" id="sync-status" role="status">${syncStatus.state === "error" ? esc("Ошибка: " + syncStatus.msg) : ""}</span></div>
     </form>`;
@@ -742,7 +828,40 @@ function viewMethod(){
   </div>`;
 }
 
+function viewGuardOther(a){
+  const sg = suggest(a.id);
+  if (!sg) return "";
+  return sg.work
+    ? `<button class="btn primary" data-act="start-work">Работа · ${W().block} мин</button>`
+    : `<button class="btn primary" data-act="start" data-a="${sg.area.id}" data-dur="${sg.dur}">${esc(sg.area.name)} · ${sg.dur} мин</button>`;
+}
 function viewOverlay(){
+  if (guard && guard.why === "watch"){
+    const a = guard.a ? areaById(guard.a) : null, wa = workArea();
+    return `<div class="overlay" role="dialog" aria-modal="true" aria-labelledby="ov-h"><div class="card">
+      <span class="label">Рабочее время до ${esc(W().to)}</span>
+      <h2 id="ov-h">${esc(guard.app)} открыт</h2>
+      <p>Это перерыв? Тогда пусть он будет на ${W().brk} минут — с таймером. Если программа нужна по работе, отметьте это, и сегодня я больше не спрошу.</p>
+      <div class="btn-row">
+        ${a ? `<button class="btn primary" data-act="start-ret" data-a="${a.id}">Перерыв: ${esc(a.name)} · ${W().brk} мин</button>` : ""}
+        ${wa ? `<button class="btn" data-act="start-work">Закрою и вернусь к работе</button>` : ""}
+        <button class="btn ghost" data-act="watch-ok" data-app="${esc(guard.app)}">Это по работе — не спрашивать сегодня</button>
+      </div></div></div>`;
+  }
+  if (guard && (guard.why === "cap" || guard.why === "again")){
+    const a = areaById(guard.a);
+    if (!a) { guard = null; return ""; }
+    const cap = guard.why === "cap";
+    return `<div class="overlay" role="dialog" aria-modal="true" aria-labelledby="ov-h"><div class="card">
+      <span class="label">${cap ? "Лимит на сегодня" : "Только что было"}</span>
+      <h2 id="ov-h">${cap ? `«${esc(a.name)}» — уже ${fmt(todayMinutes(a.id))}` : `Снова «${esc(a.name)}»?`}</h2>
+      <p>${cap ? `Дневной лимит — ${fmt(a.cap)}. Хватит на сегодня? Колесо подскажет, что давно ждёт своей очереди.` : "Блок только что закончился. Переключись хотя бы на один блок — так день не уйдёт в одно занятие."}</p>
+      <div class="btn-row">
+        ${viewGuardOther(a)}
+        <button class="btn ghost" data-act="start-force" data-a="${a.id}" data-dur="${cap ? 15 : (guard.dur || state.settings.block)}">${cap ? "Ещё 15 минут" : "Всё равно продолжить"}</button>
+        <button class="btn ghost" data-act="close-ov">Отмена</button>
+      </div></div></div>`;
+  }
   if (guard){
     const a = areaById(guard.a), wa = workArea();
     if (!a) { guard = null; return ""; }
@@ -781,6 +900,14 @@ function viewOverlay(){
   </div>`;
 }
 
+// colour theme: dark by default; "auto" follows the system
+function applyTheme(){
+  const t = state ? state.settings.theme : "dark", root = document.documentElement;
+  if (t === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", t);
+  const dark = t === "dark" || (t === "auto" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute("content", dark ? "#12161B" : "#2E5B4E");
+  if (bridge && bridge.prefs && state) bridge.prefs({ mini: state.settings.mini, theme: t });
+}
 function renderFooter(){
   const base = storeNote || (!ready ? "Загружаю данные…" : bridge ? "Данные хранятся на этом компьютере." : "Данные хранятся на этом устройстве.");
   const sync = syncCfg ? (syncStatus.state === "error" ? " Синхронизация: ошибка." : syncStatus.state === "busy" ? " Синхронизирую…" : " Синхронизация зашифрована.") : "";
@@ -794,6 +921,12 @@ function render(){
   tab = ["today","week","areas","ideas","method"].includes(h) ? h : "today";
   document.querySelectorAll("nav.tabs a").forEach(a => { if (a.dataset.tab === tab) a.setAttribute("aria-current","page"); else a.removeAttribute("aria-current"); });
   const main = $("#main");
+  if (loadFailed){
+    main.innerHTML = `<div class="onboard"><span class="label">Данные не прочитаны</span><h1>Файл данных сейчас недоступен</h1>
+      <p>Программа не смогла открыть файл с твоими записями (${esc(loadFailed)}). Чаще всего его ненадолго блокирует антивирус или синхронизация облака. Ничего не стёрто: я ничего не записываю, пока файл не прочитан.</p>
+      <div class="btn-row"><button class="btn primary" data-act="reload">Попробовать снова</button>${bridge ? '<button class="btn" data-act="open-folder">Открыть папку данных</button>' : ""}</div></div>`;
+    $("#overlay-root").innerHTML = ""; renderFooter(); return;
+  }
   if (!state || !state.started){
     main.innerHTML = tab === "method" ? viewMethod() : viewOnboard();
   } else {
@@ -801,6 +934,7 @@ function render(){
   }
   $("#overlay-root").innerHTML = state ? viewOverlay() : "";
   renderFooter();
+  applyTheme();
   updateWakeLock();
 }
 
@@ -823,7 +957,22 @@ document.addEventListener("click", e => {
     case "start-ret": startTimer(aid, W().brk, "focus", 0, true); break;
     case "start-work": { const wa = workArea(); if (wa) startTimer(wa.id, W().block, "focus", 0, false); break; }
     case "start-picked": { const v = $("#pick-area").value, a = areaById(v); if (a) requestStart(v, a.kind === "work" ? W().block : state.settings.block); break; }
-    case "extend": startTimer(aid, 10, "focus", Number(b.dataset.ext), false); break;
+    case "extend": {
+      const a = areaById(aid); if (!a) break;
+      if (a.kind !== "work" && inWork()){ guard = { a: aid, why: "work" }; render(); break; }
+      if (a.cap > 0 && todayMinutes(aid) >= a.cap){ guard = { a: aid, why: "cap" }; render(); break; }
+      startTimer(aid, 10, "focus", Number(b.dataset.ext), false); break;
+    }
+    case "start-force": requestStart(aid, b.dataset.dur, true); break;
+    case "watch-ok": watchSnooze[b.dataset.app] = todayKey(); closeOverlay(); break;
+    case "reload": location.reload(); break;
+    case "theme-set": state.settings.theme = b.dataset.v; touch("s:theme"); save(); render(); break;
+    case "export-web": {
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob), link = document.createElement("a");
+      link.href = url; link.download = "koleso-nedeli-" + todayKey() + ".json"; document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000); break;
+    }
     case "break": startTimer(null, overlay && overlay.wasWork && inWork() ? W().brk : 5, "break", 0, false); break;
     case "stop": stopTimer(false); break;
     case "close-ov": closeOverlay(); break;
@@ -831,24 +980,24 @@ document.addEventListener("click", e => {
     case "manual": { const a = $("#man-area").value, m = Number($("#man-min").value); if (a && m > 0){ addLog(a, Math.min(m, 600)); save(); render(); toast("Записано: " + fmt(m)); } break; }
     case "del-log": state.logs = state.logs.filter(l => l.id !== id); tomb("l:" + id); save(); render(); break;
     case "wk": { const d = Number(b.dataset.d); weekOffset = d === 0 ? 0 : Math.min(0, weekOffset + d); render(); break; }
-    case "theme": { const d = b.dataset.d, arr = state.theme[d] = state.theme[d] || []; const i = arr.indexOf(aid); if (i >= 0) arr.splice(i,1); else arr.push(aid); touch("theme"); save(); render(); break; }
-    case "color": { const a = areaById(id); a.color = COLORS[(COLORS.indexOf(a.color) + 1) % COLORS.length]; touch("a:" + id); save(); render(); break; }
-    case "toggle": { const a = areaById(id); a.active = !a.active; touch("a:" + id); save(); render(); break; }
-    case "breakok": { const a = areaById(id); a.breakOk = !a.breakOk; touch("a:" + id); save(); render(); break; }
+    case "theme": { const d = b.dataset.d, list = state.theme[d] = state.theme[d] || []; const i = list.indexOf(aid); if (i >= 0) list.splice(i,1); else list.push(aid); touch("theme:" + d); save(); render(); break; }
+    case "color": { const a = areaById(id); if (!a) break; a.color = COLORS[(COLORS.indexOf(a.color) + 1) % COLORS.length]; touch("a:" + id); save(); render(); break; }
+    case "toggle": { const a = areaById(id); if (!a) break; a.active = !a.active; touch("a:" + id); save(); render(); break; }
+    case "breakok": { const a = areaById(id); if (!a) break; a.breakOk = !a.breakOk; touch("a:" + id); save(); render(); break; }
     case "del-area":
       if (confirmDel !== id){ confirmDel = id; render(); break; }
       confirmDel = null;
       state.areas = state.areas.filter(a => a.id !== id); tomb("a:" + id);
-      for (const d in state.theme) state.theme[d] = state.theme[d].filter(x => x !== id);
+      for (const d in state.theme) if (state.theme[d].includes(id)){ state.theme[d] = state.theme[d].filter(x => x !== id); touch("theme:" + d); }
       if (state.timer && state.timer.a === id){ state.timer = null; touch("timer"); }
-      touch("theme", "order"); save(); render(); syncTimerToShell(); toast("Занятие удалено"); break;
+      touch("order"); save(); render(); syncTimerToShell(); toast("Занятие удалено"); break;
     case "add-area": {
       const a = { id: uid(), name: "Новое занятие", color: nextColor(), goal: 1, mini: "", active: true, kind: "hobby", breakOk: true };
       state.areas.push(a); touch("a:" + a.id, "order"); save(); render();
       const inp = document.getElementById("nm-" + a.id); if (inp){ inp.focus(); inp.select(); } break;
     }
     case "add-work": { const a = WORK_AREA(); if (areaById(a.id)) a.id = uid(); state.areas.unshift(a); touch("a:" + a.id, "order"); save(); render(); break; }
-    case "wday": { const d = Number(b.dataset.d), w = W(); w.days = w.days.includes(d) ? w.days.filter(x => x !== d) : [...w.days, d].sort(); touch("settings"); save(); render(); break; }
+    case "wday": { const d = Number(b.dataset.d), w = W(); w.days = w.days.includes(d) ? w.days.filter(x => x !== d) : [...w.days, d].sort(); touch("s:work.days"); save(); render(); break; }
     case "offday": { const tk = todayKey(); state.off = state.off.includes(tk) ? state.off.filter(x => x !== tk) : [...state.off, tk]; touch("o:" + tk); save(); render(); break; }
     case "task": { const t = state.tasks.find(x => x.id === id); if (t){ t.done = !t.done; touch("k:" + id); save(); render(); } break; }
     case "del-task": state.tasks = state.tasks.filter(x => x.id !== id); tomb("k:" + id); save(); render(); break;
@@ -861,14 +1010,14 @@ document.addEventListener("click", e => {
       save(); location.hash = "#areas"; render(); toast("Добавлено в занятия: цель 1 ч в неделю"); break;
     }
     case "del-idea": state.ideas = state.ideas.filter(x => x.id !== id); tomb("i:" + id); save(); render(); break;
-    case "autostart": if (bridge) bridge.setAutostart(b.checked).then(v => { autostart = v; }); break;
+    case "autostart": if (bridge) bridge.setAutostart(b.checked).then(v => { autostart = v; }).catch(() => toast("Не удалось изменить автозапуск")); break;
     case "open-folder": if (bridge) bridge.openDataFolder(); break;
     case "export": if (bridge){ flush(); bridge.exportData(JSON.stringify(state, null, 2)).then(p => { if (p) toast("Копия сохранена"); }).catch(() => toast("Не удалось сохранить копию")); } break;
     case "import":
       if (bridge) bridge.importData().then(d => {
         if (!d) return;
         if (!Array.isArray(d.areas)){ toast("Это не файл «Колеса недели»"); return; }
-        state = normalize(d); state.started = true; stampAll(); save(); render(); syncTimerToShell(); toast("Данные загружены из копии");
+        importState(d);
       }).catch(() => toast("Не удалось прочитать файл"));
       break;
     case "sync-now": syncNow(); break;
@@ -892,6 +1041,10 @@ document.addEventListener("submit", async e => {
     syncStatus = { state: "busy", msg: "" }; renderSyncStatus();
     try {
       await S.checkRepo(cfg);
+      const probe = await S.pull(cfg);
+      const pass2 = String(fd.get("pass2") || "");
+      if (!probe.env && pass2 !== cfg.pass) throw new Error(pass2 ? "Пароль и повтор не совпадают." : "Это первое устройство: повторите пароль, чтобы не ошибиться в нём.");
+      if (probe.env) await S.open(probe.env, cfg.pass);   // wrong passphrase stops here, before anything is written
       if (!(await syncNow(cfg))) throw new Error(syncStatus.msg || "не получилось");
       syncCfg = cfg; await storeSyncCfg(cfg);
       syncStatus = { state: "ok", msg: "", at: Date.now() };
@@ -906,22 +1059,38 @@ document.addEventListener("input", e => {
   const el = e.target;
   if (el.dataset.field){
     const a = areaById(el.dataset.id); if (!a) return;
-    if (el.dataset.field === "goal"){ const v = Number(el.value); a.goal = isFinite(v) && v >= 0 ? Math.min(v, 80) : 0; }
+    if (el.dataset.field === "goal") a.goal = num(el.value, 0, 0, 80);
+    else if (el.dataset.field === "cap") a.cap = el.value === "" ? 0 : num(el.value, 0, 0, 1440);
     else a[el.dataset.field] = el.value.slice(0, 120);
     touch("a:" + a.id); save(); refreshBudget();
   } else if (el.dataset.flag){
-    state.settings[el.dataset.flag] = el.checked; touch("settings"); save();
+    state.settings[el.dataset.flag] = el.checked; touch("s:" + el.dataset.flag); save();
+    if (el.dataset.flag === "mini" && bridge) bridge.prefs({ mini: el.checked });
+  } else if (el.dataset.sset){
+    state.settings[el.dataset.sset] = el.value.slice(0, 300); touch("s:" + el.dataset.sset); save();
   } else if (el.dataset.wflag){
-    W()[el.dataset.wflag] = el.checked; touch("settings"); save();
+    W()[el.dataset.wflag] = el.checked; touch("s:work." + el.dataset.wflag); save();
   } else if (el.dataset.wset){
     const k = el.dataset.wset;
-    if (k === "from" || k === "to"){ if (/^\d{2}:\d{2}$/.test(el.value)){ W()[k] = el.value; touch("settings"); save(); } }
-    else { const v = Number(el.value); if (isFinite(v) && v > 0){ W()[k] = v; touch("settings"); save(); } }
+    if (k === "from" || k === "to"){ if (/^\d{2}:\d{2}$/.test(el.value)){ W()[k] = el.value; touch("s:work." + k); save(); } }
+    else { const v = Number(el.value); if (isFinite(v) && v > 0){ W()[k] = v; touch("s:work." + k); save(); } }
   } else if (el.dataset.set){
-    const v = Number(el.value); if (isFinite(v) && v >= 0){ state.settings[el.dataset.set] = v; touch("settings"); save(); refreshBudget(); }
+    const v = Number(el.value); if (isFinite(v) && v >= 0){ state.settings[el.dataset.set] = v; touch("s:" + el.dataset.set); save(); refreshBudget(); }
   }
 });
-document.addEventListener("change", e => { if (e.target.dataset.field === "name" && !e.target.value.trim()){ const a = areaById(e.target.dataset.id); a.name = "Без названия"; e.target.value = a.name; touch("a:" + a.id); save(); } });
+document.addEventListener("change", e => {
+  if (e.target.dataset.field === "name" && !e.target.value.trim()){ const a = areaById(e.target.dataset.id); if (!a) return; a.name = "Без названия"; e.target.value = a.name; touch("a:" + a.id); save(); }
+  if (e.target.id === "import-file" && e.target.files && e.target.files[0]){
+    const f = e.target.files[0]; e.target.value = "";
+    if (f.size > 5*1024*1024){ toast("Файл слишком большой для резервной копии"); return; }
+    f.text().then(t => importState(JSON.parse(t))).catch(() => toast("Не удалось прочитать файл"));
+  }
+});
+function importState(d){
+  if (!d || !Array.isArray(d.areas)){ toast("Это не файл «Колеса недели»"); return; }
+  state = normalize(d); state.started = true; state.timer = null;   // an old running timer would "finish" at once
+  stampAll(); save(); render(); syncTimerToShell(); toast("Данные загружены из копии");
+}
 function refreshBudget(){
   const cur = $("#budget"); if (!cur) return;
   const tmp = document.createElement("div"); tmp.innerHTML = viewAreas();
@@ -929,10 +1098,33 @@ function refreshBudget(){
 }
 window.addEventListener("hashchange", () => { confirmDel = null; render(); window.scrollTo(0,0); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && (overlay || guard)) closeOverlay(); });
-document.addEventListener("visibilitychange", () => { if (!document.hidden){ tick(); if (syncCfg) syncNow(); } updateWakeLock(); });
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden){ syncAttempted = false; if (syncCfg) syncNow(); tick(); }
+  else if (syncCfg && syncPending) syncNow();   // edits made just before switching away
+  updateWakeLock();
+});
+// Windows: in work hours, notice when a program from the list (Unity, Godot…) is open
+const watchSnooze = {};
+async function watchApps(){
+  if (!bridge || !state || !state.started || loadFailed || !W().on || !inWork() || guard || overlay) return;
+  const t = state.timer; if (t && (t.ret || t.kind === "break")) return;   // already on a timed break
+  const pats = String(state.settings.watch || "").split(/[,;\n]/).map(p => p.trim()).filter(Boolean);
+  if (!pats.length) return;
+  let found = [];
+  try { found = await bridge.runningApps(pats); } catch(e){ return; }
+  const tk = todayKey();
+  found = found.filter(p => watchSnooze[p] !== tk);
+  if (!found.length || guard || overlay) return;
+  const target = areaById("dev") || hobbies().find(a => !a.breakOk) || hobbies()[0];
+  guard = { why: "watch", app: found[0], a: target ? target.id : null };
+  render();
+  bridge.notify({ title: "Рабочее время", body: `${found[0]} открыт. Это перерыв на ${W().brk} минут?`, popup: false, next: "" });
+}
+setInterval(watchApps, 60000);
 // re-render at midnight and when work hours start or end
 let lastMark = "";
 setInterval(() => { if (!state) return; const mark = todayKey() + inWork(); if (mark !== lastMark){ const first = !lastMark; lastMark = mark; if (!first && !editingNow()) render(); } }, 30000);
 
-boot();
+boot().then(() => { if (capsNote) toast("«Игры»: вместо цели в неделю теперь лимит 90 минут в день. Поменять можно в «Занятиях»."); })
+  .catch(e => { storeNote = "Ошибка запуска: " + ((e && e.message) || e); ready = true; try { render(); } catch(_){} });
 })();

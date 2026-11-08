@@ -80,14 +80,26 @@
     if (res.status === 403) throw new SyncError("Токену не хватает прав: нужен доступ Contents — Read and write к этому репозиторию.", "forbidden");
     if (!res.ok) throw new SyncError("GitHub ответил ошибкой " + res.status + ".", "http");
     const body = await res.json();
-    return { env: JSON.parse(atob(String(body.content || "").replace(/\s/g, ""))), sha: body.sha };
+    let text;
+    if (body.content) text = atob(String(body.content).replace(/\s/g, ""));
+    else {  // GitHub omits inline content for files over 1 MB
+      const raw = await gh(cfg, api(cfg, "/contents/" + FILE), { headers: { Accept: "application/vnd.github.raw" } });
+      if (!raw.ok) throw new SyncError("GitHub ответил ошибкой " + raw.status + ".", "http");
+      text = await raw.text();
+    }
+    return { env: JSON.parse(text), sha: body.sha };
   }
   async function push(cfg, env, sha) {
     const res = await gh(cfg, api(cfg, "/contents/" + FILE), {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(Object.assign({ message: "sync " + new Date().toISOString(), content: btoa(JSON.stringify(env)) }, sha ? { sha } : {})),
     });
-    if (res.status === 409 || res.status === 422) return false;   // someone else wrote first: pull, merge, retry
+    if (res.status === 409) return false;   // someone else wrote first: pull, merge, retry
+    if (res.status === 422) {
+      let msg = ""; try { msg = String((await res.json()).message || ""); } catch {}
+      if (/sha/i.test(msg)) return false;
+      throw new SyncError("GitHub отклонил запись" + (msg ? ": " + msg : "") + ".", "rejected");
+    }
     if (res.status === 403 || res.status === 404) throw new SyncError("Токену не хватает прав: нужен доступ Contents — Read and write к этому репозиторию.", "forbidden");
     if (!res.ok) throw new SyncError("GitHub ответил ошибкой " + res.status + ".", "http");
     return true;
@@ -96,8 +108,11 @@
   /* ---------- merge: per-record last-writer-wins with tombstones ----------
    * state.meta.u[key]   = when the record was last changed
    * state.meta.del[key] = when it was deleted
-   * keys: a:<area> l:<log> i:<idea> k:<task> c:<date>|<area> o:<date> theme settings timer order
-   * On equal stamps the remote copy wins, so two devices always converge. */
+   * keys: a:<area> l:<log> i:<idea> k:<task> c:<date>|<area> o:<date> timer order
+   *       s:<setting> s:work.<setting> theme:<weekday>   (legacy whole-object keys: settings, theme)
+   * On equal stamps the remote copy wins, so two devices always converge.
+   * Timer-made logs (id "t<start>") keep the shorter length: a block stopped early on one
+   * device must not grow back to full length because another device "finished" it later. */
   function merge(L, R) {
     L = L || {}; R = R || {};
     const u = {}, del = {};
@@ -110,11 +125,14 @@
     const alive = k => !(k in del) || (u[k] || 0) > del[k];
     const pick = k => (st(R, k) >= st(L, k) ? R : L);
 
-    function list(name, p) {
+    function list(name, p, prefer) {
       const m = new Map();
       for (const s of [L, R]) for (const r of s[name] || []) {
         const t = st(s, p + r.id), cur = m.get(r.id);
-        if (!cur || t >= cur.t) m.set(r.id, { r, t });
+        if (!cur) { m.set(r.id, { r, t }); continue; }
+        const forced = prefer && prefer(cur.r, r);
+        if (forced) m.set(r.id, { r: forced, t: Math.max(t, cur.t) });
+        else if (t >= cur.t) m.set(r.id, { r, t });
       }
       return [...m.values()].filter(x => alive(p + x.r.id)).map(x => x.r);
     }
@@ -131,11 +149,24 @@
     }
 
     const clone = v => (v == null ? v : JSON.parse(JSON.stringify(v)));
+    // object fields merged one by one, each with its own stamp (falling back to the old whole-object stamp)
+    function fields(get, prefix, legacy, skip) {
+      const l = get(L) || {}, r = get(R) || {}, res = {};
+      for (const k of new Set([...Object.keys(l), ...Object.keys(r)])) {
+        if (skip && skip.includes(k)) continue;
+        const tl = st(L, prefix + k) || st(L, legacy), tr = st(R, prefix + k) || st(R, legacy);
+        const src = tr >= tl ? (k in r ? r : l) : (k in l ? l : r);
+        res[k] = clone(src[k]);
+      }
+      return res;
+    }
+    const settings = fields(x => x.settings, "s:", "settings", ["work"]);
+    if ((L.settings && L.settings.work) || (R.settings && R.settings.work)) settings.work = fields(x => x.settings && x.settings.work, "s:work.", "settings");
     const out = {
       v: Math.max(L.v || 1, R.v || 1),
       started: !!(L.started || R.started),
-      theme: clone(pick("theme").theme || L.theme || R.theme),
-      settings: clone(pick("settings").settings || L.settings || R.settings),
+      theme: fields(x => x.theme, "theme:", "theme"),
+      settings,
       timer: clone(pick("timer").timer) || null,
       meta: { u, del },
     };
@@ -143,7 +174,7 @@
     const areas = list("areas", "a:"), orderSrc = pick("order").areas || [];
     const rank = id => { const i = orderSrc.findIndex(a => a.id === id); return i < 0 ? 1e9 : i; };
     out.areas = areas.map((a, i) => [a, i]).sort((x, y) => rank(x[0].id) - rank(y[0].id) || x[1] - y[1]).map(x => x[0]);
-    out.logs = list("logs", "l:").sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
+    out.logs = list("logs", "l:", (a, b) => (String(a.id)[0] === "t" && a.m !== b.m ? (a.m < b.m ? a : b) : null)).sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
     out.ideas = list("ideas", "i:");
     out.tasks = list("tasks", "k:");
     const checkSet = s => { const r = new Set(); for (const [d, arr] of Object.entries(s.checks || {})) for (const a of arr || []) r.add(d + "|" + a); return r; };
@@ -153,10 +184,35 @@
     // drop records whose area no longer exists only from the theme (logs keep history)
     const ids = new Set(out.areas.map(a => a.id));
     if (out.theme) for (const d of Object.keys(out.theme)) out.theme[d] = (out.theme[d] || []).filter(id => ids.has(id));
-    return clone(out);
+    return compact(clone(out));
   }
 
-  const api_ = { FILE, ITER, seal, open, checkRepo, pull, push, merge, WrongPassword, SyncError };
+  /* ---------- compact: drop old history everywhere at once ----------
+   * Called by merge and by the app before saving, so records pruned on one device
+   * are not brought back from another and the synced file stops growing. */
+  const LOG_DAYS = 200, TASK_DAYS = 60;
+  function dayKey(now, back) {
+    const x = new Date(now.getFullYear(), now.getMonth(), now.getDate()); x.setDate(x.getDate() - back);
+    return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+  }
+  function compact(s, now) {
+    now = now || new Date();
+    const cut = dayKey(now, LOG_DAYS), taskCut = dayKey(now, TASK_DAYS);
+    s.meta = s.meta || { u: {}, del: {} };
+    const u = s.meta.u = s.meta.u || {}, del = s.meta.del = s.meta.del || {};
+    s.logs = (s.logs || []).filter(l => { const keep = l.d >= cut; if (!keep) delete u["l:" + l.id]; return keep; });
+    s.tasks = (s.tasks || []).filter(t => { const keep = t.d >= taskCut; if (!keep) delete u["k:" + t.id]; return keep; });
+    for (const d of Object.keys(s.checks || {})) if (d < cut || !(s.checks[d] || []).length) delete s.checks[d];
+    s.off = (s.off || []).filter(d => d >= cut);
+    for (const k of Object.keys(u)) {
+      if ((k.startsWith("c:") && k.slice(2, 12) < cut) || (k.startsWith("o:") && k.slice(2) < cut)) delete u[k];
+    }
+    const tombCut = now.getTime() - LOG_DAYS * 864e5;
+    for (const [k, t] of Object.entries(del)) if (t < tombCut) delete del[k];
+    return s;
+  }
+
+  const api_ = { FILE, ITER, seal, open, checkRepo, pull, push, merge, compact, WrongPassword, SyncError };
   if (typeof module === "object" && module.exports) module.exports = api_;
   else root.KolesoSync = api_;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -28,8 +28,8 @@ async function sync(dev, cfg) {
   for (let i = 0; i < 4; i++) {
     const { env, sha } = await S.pull(cfg);
     const remote = env ? await S.open(env, cfg.pass) : null;
-    if (remote) dev.state = S.merge(dev.state, remote);
-    if (remote && JSON.stringify(S.merge(remote, dev.state)) === JSON.stringify(S.merge(dev.state, remote)) && same(remote, dev.state)) return;
+    dev.state = remote ? S.merge(dev.state, remote) : S.compact(dev.state);   // like the app: state is always a merge result
+    if (remote && same(remote, dev.state)) return;
     if (await S.push(cfg, await S.seal(dev.state, cfg.pass, env && env.salt), sha)) return;
   }
   throw new Error("sync did not settle");
@@ -117,6 +117,62 @@ const base = () => ({ v: 2, started: true, areas: [{ id: "en", name: "Англи
     await sync(phone, cfg); await sync(pc, cfg);
     assert.ok(same(phone.state, pc.state));
     assert.equal(pc.state.tasks.length, 1); assert.equal(phone.state.ideas.length, 1);
+  });
+  await test("audit #1: a stale device finishing an old timer does not stretch a block stopped early", async () => {
+    const pc = base(), phone = base();
+    // PC stopped the block at 20 min; the phone, unaware, later "finishes" it at full length
+    pc.logs.push({ id: "t1000", a: "en", d: "2026-11-09", m: 20 }); pc.meta.u["l:t1000"] = 5000;
+    phone.logs.push({ id: "t1000", a: "en", d: "2026-11-09", m: 45 }); phone.meta.u["l:t1000"] = 9000;
+    assert.equal(S.merge(pc, phone).logs[0].m, 20);
+    assert.equal(S.merge(phone, pc).logs[0].m, 20);
+  });
+  await test("audit #1: clearing a timer stamped at its end time does not wipe a newer block", async () => {
+    const pc = base(), phone = base();
+    pc.timer = { a: "dev", start: 7000, dur: 45 }; pc.meta.u.timer = 7000;          // new block started at 7000
+    phone.timer = null; phone.meta.u.timer = 1000 + 45 * 60000 > 7000 ? 6000 : 6000; // old block ended at 6000
+    assert.equal(S.merge(phone, pc).timer.start, 7000);
+    assert.equal(S.merge(pc, phone).timer.start, 7000);
+  });
+  await test("audit #4: settings edited on two devices keep both changes", async () => {
+    const a = base(), b = base();
+    a.settings = { block: 45, popup: true, work: { from: "10:00", to: "19:00" } };
+    b.settings = JSON.parse(JSON.stringify(a.settings));
+    a.settings.work.from = "09:00"; a.meta.u["s:work.from"] = 100;
+    b.settings.popup = false; b.meta.u["s:popup"] = 200;
+    b.theme = { 0: ["en"], 1: ["dev"] }; b.meta.u["theme:1"] = 210;
+    a.theme = { 0: ["en", "dev"], 1: [] }; a.meta.u["theme:0"] = 205;
+    for (const m of [S.merge(a, b), S.merge(b, a)]) {
+      assert.equal(m.settings.work.from, "09:00");
+      assert.equal(m.settings.popup, false);
+      assert.deepEqual(m.theme[0], ["en", "dev"]);
+      assert.deepEqual(m.theme[1], ["dev"]);
+    }
+  });
+  await test("audit #3: history pruned on one device is not resurrected, and stamps are dropped", async () => {
+    const now = new Date(2026, 10, 9);
+    const old = { id: "l-old", a: "en", d: "2025-01-01", m: 30 };
+    const a = base(), b = base();
+    b.logs.push(old); b.meta.u["l:l-old"] = 1; b.checks = { "2025-01-01": ["en"] }; b.meta.u["c:2025-01-01|en"] = 1;
+    const m = S.compact(S.merge(a, b), now);
+    assert.equal(m.logs.length, 0);
+    assert.ok(!("l:l-old" in m.meta.u) && !("c:2025-01-01|en" in m.meta.u));
+    assert.deepEqual(m.checks, {});
+  });
+  await test("GitHub: files over 1 MB are read through the raw endpoint", async () => {
+    const env = await S.seal(base(), "phrase-1234");
+    global.fetch = async (url, init = {}) => {
+      const raw = /raw/.test((init.headers || {}).Accept || "");
+      return { ok: true, status: 200, headers: { get: () => null },
+        json: async () => ({ content: "", encoding: "none", sha: "s1" }), text: async () => (raw ? JSON.stringify(env) : "") };
+    };
+    const r = await S.pull({ owner: "me", repo: "r", token: "good-token" });
+    assert.equal(r.sha, "s1"); assert.equal(r.env.ct, env.ct);
+  });
+  await test("GitHub: a 422 that is not a sha conflict is reported, not retried", async () => {
+    global.fetch = async () => ({ ok: false, status: 422, headers: { get: () => null }, json: async () => ({ message: "Invalid request: content too large" }) });
+    await assert.rejects(S.push({ owner: "me", repo: "r", token: "good-token" }, {}, "x"), e => e.code === "rejected");
+    global.fetch = async () => ({ ok: false, status: 422, headers: { get: () => null }, json: async () => ({ message: "sha wasn't supplied" }) });
+    assert.equal(await S.push({ owner: "me", repo: "r", token: "good-token" }, {}, null), false);
   });
   await test("wrong passphrase on a second device never overwrites the remote file", async () => {
     const gh = fakeGitHub();
