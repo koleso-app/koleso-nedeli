@@ -75,7 +75,7 @@ function normalize(s){
     tasks: arr(s.tasks).filter(k => k && k.id && okDate(k.d)).map(k => ({ id: sid(k.id), d: k.d, t: String(k.t ?? "").slice(0, 200), done: !!k.done })),
     off: arr(s.off).filter(okDate),
     settings: {
-      block: num(st.block, 45, 5, 240), maxExt: num(st.maxExt, 1, 0, 5), freeWeekday: num(st.freeWeekday, 3, 0, 24), freeWeekend: num(st.freeWeekend, 8, 0, 24),
+      block: num(st.block, 45, 5, 240), maxExt: num(st.maxExt, 1, 0, 5), dayStart: num(st.dayStart, 8, 0, 12), freeWeekday: num(st.freeWeekday, 3, 0, 24), freeWeekend: num(st.freeWeekend, 8, 0, 24),
       popup: st.popup !== false, mini: st.mini !== false, workAdded: !!st.workAdded, capsAdded: !!st.capsAdded,
       theme: ["dark", "light", "auto"].includes(st.theme) ? st.theme : "dark",
       watch: (st.watch === undefined || st.watch === "Unity.exe, Godot*.exe" ? "" : String(st.watch)).slice(0, 300),
@@ -206,6 +206,7 @@ async function boot(){
     for (const a of state.areas) if (a.kind !== "work" && /^игры$/i.test(a.name.trim()) && !a.cap){ a.cap = 90; a.goal = 0; a.mini = ""; touch("a:" + a.id); capsNote = true; }
     state.settings.capsAdded = true; touch("s:capsAdded"); save();
   }
+  if (state && redateTimerLogs()) save();
   if (state) applyTheme();
   syncCfg = await loadSyncCfg();
   ready = true;
@@ -223,7 +224,21 @@ function syncTimerToShell(){
 function editingNow(){ const a = document.activeElement; return a && a.closest && a.closest("#main, #overlay-root") && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName); }
 
 /* ---------- derived ---------- */
-const today = () => new Date();
+// a night owl's day: until settings.dayStart (e.g. 8:00) it is still "yesterday" for logs, mini-steps, themes and the week
+const dayStartH = () => (state && state.settings && state.settings.dayStart) || 0;
+const dayOf = ms => new Date(ms - dayStartH() * 3600000);
+const today = () => dayOf(Date.now());
+// timer entries know when they started ("t<ms>"), so their day can follow the day-start setting
+function redateTimerLogs(){
+  let n = 0;
+  for (const l of state.logs){
+    const ms = /^t\d{12,}$/.test(l.id) ? Number(l.id.slice(1)) : NaN;
+    if (!Number.isFinite(ms)) continue;
+    const d = key(dayOf(ms));
+    if (d !== l.d){ l.d = d; touch("l:" + l.id); n++; }
+  }
+  return n;
+}
 const todayKey = () => key(today());
 const areaById = id => state.areas.find(a => a.id === id);
 const activeAreas = () => state.areas.filter(a => a.active);
@@ -338,7 +353,7 @@ function startTimer(aid, dur, kind, ext, ret){
 function stopTimer(silent){
   const t = state.timer; if (!t) return;
   const mins = Math.min(t.dur, Math.floor((Date.now() - t.start) / 60000));
-  if (t.kind === "focus") addLog(t.a, mins, key(new Date(t.start)), "t" + t.start);
+  if (t.kind === "focus") addLog(t.a, mins, key(dayOf(t.start)), "t" + t.start);
   state.timer = null; touch("timer"); document.title = "Колесо недели";
   if (!silent){ save(); render(); syncTimerToShell(); syncSoon(); if (t.kind === "focus") toast(mins >= 1 ? "Записано: " + fmt(mins) : "Меньше минуты — не записываю"); }
 }
@@ -373,7 +388,7 @@ function finishTimer(){
   // stamp with the moment the block really ended, so a device that wakes up late
   // cannot override a block started elsewhere since then
   const end = t.start + t.dur*60000;
-  if (t.kind === "focus") addLog(t.a, t.dur, key(new Date(t.start)), "t" + t.start, end);
+  if (t.kind === "focus") addLog(t.a, t.dur, key(dayOf(t.start)), "t" + t.start, end);
   state.timer = null; touchAt("timer", end);
   const a = areaById(t.a);
   const late = Date.now() - end > 90000;          // the app was closed when the timer ran out
@@ -724,7 +739,9 @@ function viewSettings(){
         <label>Свободных часов в выходной<input class="input num" id="set-we" type="number" min="0" max="18" step="0.5" data-set="freeWeekend" value="${s.freeWeekend}"></label>
         <label>Длина блока по умолчанию, мин<input class="input num" id="set-bl" type="number" min="10" max="180" step="5" data-set="block" value="${s.block}"></label>
         <label>Сколько раз можно продлить блок<input class="input num" id="set-ex" type="number" min="0" max="5" step="1" data-set="maxExt" value="${s.maxExt}"></label>
+        <label>Новый день начинается в<select class="input" id="set-ds">${[...Array(13)].map((_, h) => `<option value="${h}" ${h === s.dayStart ? "selected" : ""}>${pad(h)}:00${h === 0 ? " (полночь)" : ""}</option>`).join("")}</select></label>
       </div>
+      <p class="small muted" style="margin-top:8px">Если ложишься после полуночи: всё, что сделано до этого часа, засчитывается в предыдущий день — записи, мини-шаги, тема дня и неделя.</p>
     </section>
     ${hasWork ? `<section class="panel">
       <div class="head"><h2>Рабочее время</h2></div>
@@ -1141,6 +1158,7 @@ document.addEventListener("input", e => {
 });
 document.addEventListener("change", e => {
   if (e.target.id === "pick-area"){ picked = e.target.value; render(); return; }
+  if (e.target.id === "set-ds"){ state.settings.dayStart = num(e.target.value, 8, 0, 12); touch("s:dayStart"); const n = redateTimerLogs(); save(); render(); syncSoon(); if (n) toast("Перенесено записей таймера на нужный день: " + n); return; }
   if (e.target.dataset.log){   // an entry logged under the wrong activity: move it
     const l = state.logs.find(x => x.id === e.target.dataset.log), a = areaById(e.target.value);
     if (l && a && l.a !== a.id){ l.a = a.id; touch("l:" + l.id); save(); render(); toast(`Перенесено в «${a.name}»: ${fmt(l.m)}`); }
