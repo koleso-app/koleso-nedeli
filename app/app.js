@@ -331,6 +331,7 @@ function requestStart(aid, dur, force){
 function startTimer(aid, dur, kind, ext, ret){
   ensureAudio();
   if (state.timer) stopTimer(true);
+  picked = null;
   state.timer = { a: aid || null, start: Date.now(), dur: Number(dur), kind: kind || "focus", ext: ext || 0, ret: !!ret };
   touch("timer"); overlay = null; guard = null; save(); render(); syncTimerToShell(); syncSoon();
 }
@@ -445,7 +446,7 @@ function workBar(done){
 }
 
 /* ---------- views ---------- */
-let tab = "today", weekOffset = 0, confirmDel = null;
+let tab = "today", weekOffset = 0, confirmDel = null, picked = null;
 
 function viewOnboard(){
   return `<div class="onboard">
@@ -480,25 +481,29 @@ function viewNextCard(){
       </div>
     </section>`;
   }
-  const sg = suggest();
-  if (!sg) return `<section class="panel next"><div class="ring"></div><span class="label">Что дальше</span><h2>Добавь занятия</h2><p class="why">Во вкладке «Занятия» задай интересы и цели на неделю — тогда здесь появится подсказка.</p><div class="btn-row" style="margin-top:14px"><a class="btn solid" href="#areas">Открыть «Занятия»</a></div></section>`;
+  const hint = suggest();
+  if (!hint) return `<section class="panel next"><div class="ring"></div><span class="label">Что дальше</span><h2>Добавь занятия</h2><p class="why">Во вкладке «Занятия» задай интересы и цели на неделю — тогда здесь появится подсказка.</p><div class="btn-row" style="margin-top:14px"><a class="btn solid" href="#areas">Открыть «Занятия»</a></div></section>`;
+  // an activity chosen in the list takes over the whole card, so every button starts what you picked
+  const pa = picked && areaById(picked);
+  const own = !!(pa && pa.active && pa.id !== hint.area.id);
+  if (!own) picked = null;
+  const sg = own ? { area: pa, work: pa.kind === "work", dur: pa.kind === "work" ? W().block : state.settings.block } : hint;
   const b = sg.dur;
-  const opts = activeAreas().map(a => `<option value="${a.id}" ${a.id === sg.area.id ? "selected" : ""}>${esc(a.name)}</option>`).join("");
+  const opts = activeAreas().map(a => `<option value="${a.id}" ${a.id === sg.area.id ? "selected" : ""}>${esc(a.name)}${a.id === hint.area.id ? " — подсказка" : ""}</option>`).join("");
   return `<section class="panel next ${sg.work ? "is-work" : ""}">
     <div class="ring"></div>
-    <span class="label">${sg.work ? "Сейчас — работа" : "Что дальше"}</span>
+    <span class="label">${own ? "Твой выбор" : sg.work ? "Сейчас — работа" : "Что дальше"}</span>
     <h2>${esc(sg.area.name)}</h2>
-    <p class="why">${esc(sg.why)}</p>
+    <p class="why">${own ? `Подсказка была: «${esc(hint.area.name)}». <button class="linkbtn" data-act="unpick">Вернуть</button>` : esc(sg.why)}</p>
     ${sg.area.mini ? `<div class="mini small"><b>Мини-шаг:</b> ${esc(sg.area.mini)}</div>` : ""}
     <div class="btn-row" style="margin-top:14px">
       <button class="btn solid" data-act="start" data-a="${sg.area.id}" data-dur="${b}">Старт · ${b} мин</button>
-      ${sg.work ? "" : `<button class="btn" data-act="start" data-a="${sg.area.id}" data-dur="25">25 мин</button>`}
-      <button class="btn" data-act="start" data-a="${sg.area.id}" data-dur="15">15 мин</button>
+      ${sg.work || b === 25 ? "" : `<button class="btn" data-act="start" data-a="${sg.area.id}" data-dur="25">25 мин</button>`}
+      ${b === 15 ? "" : `<button class="btn" data-act="start" data-a="${sg.area.id}" data-dur="15">15 мин</button>`}
     </div>
     <div class="btn-row" style="margin-top:10px">
-      <label class="small" for="pick-area" style="opacity:.8">Или другое:</label>
+      <label class="small" for="pick-area" style="opacity:.8">Выбрать другое:</label>
       <select class="input small" id="pick-area">${opts}</select>
-      <button class="btn small" data-act="start-picked">Старт</button>
     </div>
   </section>`;
 }
@@ -560,7 +565,7 @@ function viewTodayLog(){
   const total = items.reduce((s,l) => s + l.m, 0);
   return `<section class="panel">
     <div class="head"><h3>Записано сегодня</h3><span class="small muted num">${fmt(total)}</span></div>
-    <div class="log">${items.length ? items.map(l => { const a = areaById(l.a); return `<div class="it"><span class="dot" style="background:${a ? a.color : "var(--muted)"}"></span><span class="grow">${esc(a ? a.name : "Удалённое занятие")}</span><span class="num small">${fmt(l.m)}</span><button class="x" data-act="del-log" data-id="${l.id}" aria-label="Удалить запись">×</button></div>`; }).join("") : '<p class="small muted">Пока пусто. Запусти блок таймером или запиши время вручную.</p>'}</div>
+    <div class="log">${items.length ? items.map(l => { const a = areaById(l.a); const own = state.areas.filter(x => x.active || x.id === l.a).map(x => `<option value="${x.id}" ${x.id === l.a ? "selected" : ""}>${esc(x.name)}</option>`).join(""); return `<div class="it"><span class="dot" style="background:${a ? a.color : "var(--muted)"}"></span><span class="grow"><select class="log-area" data-log="${l.id}" aria-label="Занятие этой записи — можно поменять">${a ? "" : '<option value="" selected>Удалённое занятие</option>'}${own}</select></span><span class="num small">${fmt(l.m)}</span><button class="x" data-act="del-log" data-id="${l.id}" aria-label="Удалить запись">×</button></div>`; }).join("") : '<p class="small muted">Пока пусто. Запусти блок таймером или запиши время вручную.</p>'}</div>
     <div class="btn-row" style="margin-top:12px">
       <select class="input small" id="man-area" aria-label="Занятие">${opts}</select>
       <input class="input small num" id="man-min" type="number" min="1" max="600" step="5" value="30" style="width:80px" aria-label="Минуты">
@@ -967,6 +972,7 @@ document.addEventListener("click", e => {
     case "start": requestStart(aid, b.dataset.dur); break;
     case "start-ret": startTimer(aid, W().brk, "focus", 0, true); break;
     case "start-work": { const wa = workArea(); if (wa) startTimer(wa.id, W().block, "focus", 0, false); break; }
+    case "unpick": picked = null; render(); break;
     case "start-picked": { const v = $("#pick-area").value, a = areaById(v); if (a) requestStart(v, a.kind === "work" ? W().block : state.settings.block); break; }
     case "extend": {
       const a = areaById(aid); if (!a) break;
@@ -1090,6 +1096,12 @@ document.addEventListener("input", e => {
   }
 });
 document.addEventListener("change", e => {
+  if (e.target.id === "pick-area"){ picked = e.target.value; render(); return; }
+  if (e.target.dataset.log){   // an entry logged under the wrong activity: move it
+    const l = state.logs.find(x => x.id === e.target.dataset.log), a = areaById(e.target.value);
+    if (l && a && l.a !== a.id){ l.a = a.id; touch("l:" + l.id); save(); render(); toast(`Перенесено в «${a.name}»: ${fmt(l.m)}`); }
+    return;
+  }
   if (e.target.dataset.field === "name" && !e.target.value.trim()){ const a = areaById(e.target.dataset.id); if (!a) return; a.name = "Без названия"; e.target.value = a.name; touch("a:" + a.id); save(); }
   if (e.target.id === "import-file" && e.target.files && e.target.files[0]){
     const f = e.target.files[0]; e.target.value = "";

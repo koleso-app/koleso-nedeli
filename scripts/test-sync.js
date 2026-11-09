@@ -126,6 +126,16 @@ const base = () => ({ v: 2, started: true, areas: [{ id: "en", name: "Англи
     assert.equal(S.merge(pc, phone).logs[0].m, 20);
     assert.equal(S.merge(phone, pc).logs[0].m, 20);
   });
+  await test("a timer entry moved to another activity keeps the move and the shorter length", async () => {
+    const pc = base(), phone = base();
+    // the phone still has the old copy; on the PC the entry was moved to "dev" afterwards
+    phone.logs.push({ id: "t2000", a: "en", d: "2026-11-09", m: 15 }); phone.meta.u["l:t2000"] = 5000;
+    pc.logs.push({ id: "t2000", a: "dev", d: "2026-11-09", m: 15 }); pc.meta.u["l:t2000"] = 9000;
+    assert.equal(S.merge(pc, phone).logs[0].a, "dev"); assert.equal(S.merge(phone, pc).logs[0].a, "dev");
+    // same, while the phone also holds a longer length for it
+    phone.logs[0].m = 50;
+    for (const m of [S.merge(pc, phone), S.merge(phone, pc)]) { assert.equal(m.logs[0].a, "dev"); assert.equal(m.logs[0].m, 15); }
+  });
   await test("audit #1: clearing a timer stamped at its end time does not wipe a newer block", async () => {
     const pc = base(), phone = base();
     pc.timer = { a: "dev", start: 7000, dur: 45 }; pc.meta.u.timer = 7000;          // new block started at 7000

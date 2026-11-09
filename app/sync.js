@@ -130,7 +130,7 @@
       for (const s of [L, R]) for (const r of s[name] || []) {
         const t = st(s, p + r.id), cur = m.get(r.id);
         if (!cur) { m.set(r.id, { r, t }); continue; }
-        const forced = prefer && prefer(cur.r, r);
+        const forced = prefer && prefer(cur.r, r, cur.t, t);
         if (forced) m.set(r.id, { r: forced, t: Math.max(t, cur.t) });
         else if (t >= cur.t) m.set(r.id, { r, t });
       }
@@ -174,7 +174,8 @@
     const areas = list("areas", "a:"), orderSrc = pick("order").areas || [];
     const rank = id => { const i = orderSrc.findIndex(a => a.id === id); return i < 0 ? 1e9 : i; };
     out.areas = areas.map((a, i) => [a, i]).sort((x, y) => rank(x[0].id) - rank(y[0].id) || x[1] - y[1]).map(x => x[0]);
-    out.logs = list("logs", "l:", (a, b) => (String(a.id)[0] === "t" && a.m !== b.m ? (a.m < b.m ? a : b) : null)).sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
+    // a timer entry keeps the shorter length (an early stop must not grow back), the rest of it comes from the newer edit
+    out.logs = list("logs", "l:", (a, b, ta, tb) => (String(a.id)[0] === "t" && a.m !== b.m ? { ...(tb >= ta ? b : a), m: Math.min(a.m, b.m) } : null)).sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
     out.ideas = list("ideas", "i:");
     out.tasks = list("tasks", "k:");
     const checkSet = s => { const r = new Set(); for (const [d, arr] of Object.entries(s.checks || {})) for (const a of arr || []) r.add(d + "|" + a); return r; };

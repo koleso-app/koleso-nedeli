@@ -1,6 +1,6 @@
 {
   "name": "koleso-nedeli",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Колесо недели — личный планировщик свободного времени: таймер блоков, темы дней, мини-шаги.",
   "main": "main.js",
   "private": true,
