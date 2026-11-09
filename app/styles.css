@@ -243,3 +243,8 @@ details.howto ol{margin:8px 0 0;padding-left:20px;display:flex;flex-direction:co
 .overlay .split{margin:4px 0 14px}
 .x.split-btn{font-size:16px}
 .linkbtn.small{font-size:13px}
+
+/* "Записать время?" under a ticked mini-step */
+.ask-min{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+.ask-min .pill{color:var(--ink)}
+.ask-min .pill.on{color:var(--accent)}

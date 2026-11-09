@@ -502,7 +502,7 @@ function workBar(done){
 }
 
 /* ---------- views ---------- */
-let tab = "today", weekOffset = 0, confirmDel = null, picked = null, splitId = null;
+let tab = "today", weekOffset = 0, confirmDel = null, picked = null, splitId = null, askMin = null;
 
 function viewOnboard(){
   return `<div class="onboard">
@@ -606,7 +606,7 @@ function viewChecks(){
       const on = done.includes(a.id), st = streak(a.id);
       return `<div class="check ${on ? "done" : ""}" style="--c:${a.color}">
         <button class="box" data-act="check" data-a="${a.id}" aria-pressed="${on}" aria-label="${esc(a.name)}: мини-шаг выполнен">${CHECK_SVG}</button>
-        <div class="t"><b>${esc(a.name)}</b>${a.breakOk ? ' <span class="tag">в перерыв</span>' : ""}<div class="m small">${esc(a.mini)}</div></div>
+        <div class="t"><b>${esc(a.name)}</b>${a.breakOk ? ' <span class="tag">в перерыв</span>' : ""}<div class="m small">${esc(a.mini)}</div>${on && askMin === a.id ? viewAskMin(a) : ""}</div>
         <span class="streak ${st >= 3 ? "hot" : ""}">${st ? "серия " + st + " дн." : ""}</span>
       </div>`; }).join("")}
     </div>
@@ -614,6 +614,16 @@ function viewChecks(){
   </section>`;
 }
 
+// a ticked mini-step took real time: one tap puts it into the week
+function miniMinutes(a){ const m = /(\d{1,3})\s*мин/i.exec(a.mini || ""); return m ? num(m[1], 0, 1, 240) : 0; }
+function viewAskMin(a){
+  const hint = miniMinutes(a), opts = [...new Set([10, 15, 20, hint].filter(Boolean))].sort((x, y) => x - y);
+  return `<div class="ask-min" role="group" aria-label="Сколько минут записать">
+    <span class="small muted">Записать время?</span>
+    ${opts.map(m => `<button class="pill ${m === hint ? "on" : ""}" data-act="mini-log" data-a="${a.id}" data-m="${m}">+${m} мин</button>`).join("")}
+    <button class="linkbtn small" data-act="mini-skip">не записывать</button>
+  </div>`;
+}
 function viewTodayLog(){
   const tk = todayKey();
   const items = state.logs.filter(l => l.d === tk);
@@ -1069,7 +1079,12 @@ document.addEventListener("click", e => {
     case "break": startTimer(null, overlay && overlay.wasWork && inWork() ? W().brk : 5, "break", 0, false); break;
     case "stop": stopTimer(false); break;
     case "close-ov": closeOverlay(); break;
-    case "check": { const tk = todayKey(), arr = state.checks[tk] = state.checks[tk] || []; const i = arr.indexOf(aid); if (i >= 0) arr.splice(i,1); else arr.push(aid); touch("c:" + tk + "|" + aid); save(); render(); break; }
+    case "check": { const tk = todayKey(), arr = state.checks[tk] = state.checks[tk] || []; const i = arr.indexOf(aid); if (i >= 0) arr.splice(i,1); else arr.push(aid); touch("c:" + tk + "|" + aid);
+      const running = state.timer && state.timer.a === aid;   // a running block already counts this time
+      askMin = i < 0 && !running ? aid : (askMin === aid ? null : askMin);
+      save(); render(); break; }
+    case "mini-log": { const a = areaById(aid), m = Number(b.dataset.m); if (a && m > 0){ addLog(a.id, m); askMin = null; save(); render(); syncSoon(); toast(`Записано: «${a.name}» — ${fmt(m)}`); } break; }
+    case "mini-skip": askMin = null; render(); break;
     case "manual": { const a = $("#man-area").value, m = Number($("#man-min").value); if (a && m > 0){ addLog(a, Math.min(m, 600)); save(); render(); toast("Записано: " + fmt(m)); } break; }
     case "del-log": state.logs = state.logs.filter(l => l.id !== id); tomb("l:" + id); save(); render(); break;
     case "wk": { const d = Number(b.dataset.d); weekOffset = d === 0 ? 0 : Math.min(0, weekOffset + d); render(); break; }
