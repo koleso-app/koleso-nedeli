@@ -160,6 +160,7 @@ async function syncNow(cfg){
       if (merged && stable(merged) !== stable(state)){
         state = merged; noteStamps(state); persist(); if (!editingNow()) render(); syncTimerToShell();
       }
+      if (state && fixDays()){ persist(); if (!editingNow()) render(); }   // e.g. a not-yet-updated phone dated something "tomorrow"
       if (!state || (remote && stable(remote) === stable(state))) { ok = true; break; }
       const snapshot = JSON.parse(JSON.stringify(state));
       if (await S.push(c, await S.seal(snapshot, c.pass, env && env.salt), sha)) { ok = true; break; }
@@ -206,7 +207,7 @@ async function boot(){
     for (const a of state.areas) if (a.kind !== "work" && /^игры$/i.test(a.name.trim()) && !a.cap){ a.cap = 90; a.goal = 0; a.mini = ""; touch("a:" + a.id); capsNote = true; }
     state.settings.capsAdded = true; touch("s:capsAdded"); save();
   }
-  if (state && redateTimerLogs()) save();
+  if (state && fixDays()) save();
   if (state) applyTheme();
   syncCfg = await loadSyncCfg();
   ready = true;
@@ -236,6 +237,20 @@ function redateTimerLogs(){
     if (!Number.isFinite(ms)) continue;
     const d = key(dayOf(ms));
     if (d !== l.d){ l.d = d; touch("l:" + l.id); n++; }
+  }
+  return n;
+}
+// The app never dates anything in the future. A later "tomorrow" comes from the real calendar after midnight
+// (before the day-start setting existed, or from a device that has not updated yet): it belongs to today.
+function fixDays(){
+  let n = redateTimerLogs();
+  const tk = todayKey();
+  for (const t of state.tasks) if (t.d > tk){ t.d = tk; touch("k:" + t.id); n++; }
+  for (const l of state.logs) if (l.d > tk && !/^t\d{12,}$/.test(l.id)){ l.d = tk; touch("l:" + l.id); n++; }
+  for (const d of Object.keys(state.checks)) if (d > tk){
+    const to = state.checks[tk] = state.checks[tk] || [];
+    for (const a of state.checks[d]){ touch("c:" + d + "|" + a); if (!to.includes(a)){ to.push(a); touch("c:" + tk + "|" + a); } n++; }
+    delete state.checks[d];
   }
   return n;
 }
@@ -1158,7 +1173,7 @@ document.addEventListener("input", e => {
 });
 document.addEventListener("change", e => {
   if (e.target.id === "pick-area"){ picked = e.target.value; render(); return; }
-  if (e.target.id === "set-ds"){ state.settings.dayStart = num(e.target.value, 8, 0, 12); touch("s:dayStart"); const n = redateTimerLogs(); save(); render(); syncSoon(); if (n) toast("Перенесено записей таймера на нужный день: " + n); return; }
+  if (e.target.id === "set-ds"){ state.settings.dayStart = num(e.target.value, 8, 0, 12); touch("s:dayStart"); const n = fixDays(); save(); render(); syncSoon(); if (n) toast("Записей перенесено на нужный день: " + n); return; }
   if (e.target.dataset.log){   // an entry logged under the wrong activity: move it
     const l = state.logs.find(x => x.id === e.target.dataset.log), a = areaById(e.target.value);
     if (l && a && l.a !== a.id){ l.a = a.id; touch("l:" + l.id); save(); render(); toast(`Перенесено в «${a.name}»: ${fmt(l.m)}`); }
