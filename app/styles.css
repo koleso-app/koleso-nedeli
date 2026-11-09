@@ -237,3 +237,9 @@ details.howto ol{margin:8px 0 0;padding-left:20px;display:flex;flex-direction:co
 .log select.log-area { appearance:none; -webkit-appearance:none; background:transparent; border:0; border-bottom:1px dashed var(--muted); color:inherit; font:inherit; padding:0 2px 1px 0; max-width:100%; cursor:pointer; }
 .log select.log-area:hover, .log select.log-area:focus-visible { border-bottom-style:solid; outline:none; color:var(--accent); }
 .log select.log-area option { background:var(--surface); color:var(--ink); }
+
+/* "part of the block went to something else" */
+.split{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:6px 0 10px 20px;padding:10px 12px;border-radius:10px;background:var(--accent-soft)}
+.overlay .split{margin:4px 0 14px}
+.x.split-btn{font-size:16px}
+.linkbtn.small{font-size:13px}

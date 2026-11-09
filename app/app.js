@@ -342,6 +342,31 @@ function stopTimer(silent){
   state.timer = null; touch("timer"); document.title = "Колесо недели";
   if (!silent){ save(); render(); syncTimerToShell(); syncSoon(); if (t.kind === "focus") toast(mins >= 1 ? "Записано: " + fmt(mins) : "Меньше минуты — не записываю"); }
 }
+/* part of a block went to something else (in parallel, e.g. while an AI agent worked):
+   the minutes move from the entry to a new entry of the other activity, the total stays the same */
+function splitLog(id, aid, m){
+  const l = state.logs.find(x => x.id === id), a = areaById(aid);
+  m = Math.round(Number(m));
+  if (!l || !a || a.id === l.a || !(m >= 1)) return null;
+  m = Math.min(m, l.m - 1); if (m < 1) return null;
+  l.m -= m; touch("l:" + l.id);
+  const nid = "s" + uid();
+  addLog(a.id, m, l.d, nid);
+  return { a: a.id, m };
+}
+function viewSplit(l){
+  const others = activeAreas().filter(x => x.id !== l.a);
+  if (!others.length) return "";
+  const def = others.find(x => x.kind !== "work") || others[0], v = Math.min(l.m - 1, Math.max(1, Math.round(l.m / 5 / 5) * 5 || 5));
+  return `<div class="split">
+    <span class="small">Из <b class="num">${fmt(l.m)}</b> на</span>
+    <select class="input small" data-split="area" aria-label="Другое занятие">${others.map(x => `<option value="${x.id}" ${x === def ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+    <input class="input small num" data-split="min" type="number" min="1" max="${l.m - 1}" step="5" value="${v}" style="width:70px" aria-label="Минут на другое занятие">
+    <span class="small muted">мин</span>
+    <button class="btn small" data-act="split-do" data-id="${l.id}">Разделить</button>
+    <button class="linkbtn small" data-act="split-cancel">Отмена</button>
+  </div>`;
+}
 function finishTimer(){
   const t = state.timer; if (!t || finishing) return;
   finishing = true;
@@ -359,7 +384,8 @@ function finishTimer(){
     if (t.kind === "focus") toast(`Блок «${a ? a.name : "Занятие"}» закончился, пока приложение было закрыто — записано ${fmt(t.dur)}.`);
     render(); finishing = false; return;
   }
-  overlay = { kind: t.kind, a: t.a, dur: t.dur, ext: t.ext, ret: t.ret, wasWork: !!(a && a.kind === "work") };
+  overlay = { kind: t.kind, a: t.a, dur: t.dur, ext: t.ext, ret: t.ret, wasWork: !!(a && a.kind === "work"), log: t.kind === "focus" ? "t" + t.start : null, parts: [] };
+  splitId = null;
   beep(); render();
   try { navigator.vibrate && navigator.vibrate([300, 150, 300]); } catch(e){}
   document.title = "Пора переключиться · Колесо недели";
@@ -446,7 +472,7 @@ function workBar(done){
 }
 
 /* ---------- views ---------- */
-let tab = "today", weekOffset = 0, confirmDel = null, picked = null;
+let tab = "today", weekOffset = 0, confirmDel = null, picked = null, splitId = null;
 
 function viewOnboard(){
   return `<div class="onboard">
@@ -565,7 +591,7 @@ function viewTodayLog(){
   const total = items.reduce((s,l) => s + l.m, 0);
   return `<section class="panel">
     <div class="head"><h3>Записано сегодня</h3><span class="small muted num">${fmt(total)}</span></div>
-    <div class="log">${items.length ? items.map(l => { const a = areaById(l.a); const own = state.areas.filter(x => x.active || x.id === l.a).map(x => `<option value="${x.id}" ${x.id === l.a ? "selected" : ""}>${esc(x.name)}</option>`).join(""); return `<div class="it"><span class="dot" style="background:${a ? a.color : "var(--muted)"}"></span><span class="grow"><select class="log-area" data-log="${l.id}" aria-label="Занятие этой записи — можно поменять">${a ? "" : '<option value="" selected>Удалённое занятие</option>'}${own}</select></span><span class="num small">${fmt(l.m)}</span><button class="x" data-act="del-log" data-id="${l.id}" aria-label="Удалить запись">×</button></div>`; }).join("") : '<p class="small muted">Пока пусто. Запусти блок таймером или запиши время вручную.</p>'}</div>
+    <div class="log">${items.length ? items.map(l => { const a = areaById(l.a); const own = state.areas.filter(x => x.active || x.id === l.a).map(x => `<option value="${x.id}" ${x.id === l.a ? "selected" : ""}>${esc(x.name)}</option>`).join(""); return `<div class="it"><span class="dot" style="background:${a ? a.color : "var(--muted)"}"></span><span class="grow"><select class="log-area" data-log="${l.id}" aria-label="Занятие этой записи — можно поменять">${a ? "" : '<option value="" selected>Удалённое занятие</option>'}${own}</select></span><span class="num small">${fmt(l.m)}</span>${l.m >= 2 ? `<button class="x split-btn" data-act="split-open" data-id="${l.id}" title="Разделить: часть времени была на другом" aria-label="Разделить запись">÷</button>` : ""}<button class="x" data-act="del-log" data-id="${l.id}" aria-label="Удалить запись">×</button></div>${splitId === l.id && !(overlay && overlay.log === l.id) ? viewSplit(l) : ""}`; }).join("") : '<p class="small muted">Пока пусто. Запусти блок таймером или запиши время вручную.</p>'}</div>
     <div class="btn-row" style="margin-top:12px">
       <select class="input small" id="man-area" aria-label="Занятие">${opts}</select>
       <input class="input small num" id="man-min" type="number" min="1" max="600" step="5" value="30" style="width:80px" aria-label="Минуты">
@@ -851,6 +877,15 @@ function viewGuardOther(a){
     ? `<button class="btn primary" data-act="start-work">Работа · ${W().block} мин</button>`
     : `<button class="btn primary" data-act="start" data-a="${sg.area.id}" data-dur="${sg.dur}">${esc(sg.area.name)} · ${sg.dur} мин</button>`;
 }
+function viewOverlayLog(o, a){
+  const l = o.log && state.logs.find(x => x.id === o.log);
+  const m = l ? l.m : o.dur;
+  const parts = (o.parts || []).map(p => { const pa = areaById(p.a); return `, «${esc(pa ? pa.name : "Занятие")}» — <b class="num">${fmt(p.m)}</b>`; }).join("");
+  let html = `<p>«${esc(a ? a.name : "Занятие")}» — записано <b class="num">${fmt(m)}</b>${parts}.</p>`;
+  if (l && l.m >= 2) html += splitId === l.id ? viewSplit(l)
+    : `<p class="small"><button class="linkbtn" data-act="split-open" data-id="${l.id}">Часть времени была на другом?</button></p>`;
+  return html;
+}
 function viewOverlay(){
   if (guard && guard.why === "watch"){
     const a = guard.a ? areaById(guard.a) : null, wa = workArea();
@@ -902,7 +937,7 @@ function viewOverlay(){
     <div class="card">
       <span class="label">${o.kind === "focus" ? "Блок закончен" : "Перерыв окончен"}</span>
       <h2 id="ov-h">${esc(nx.title)}</h2>
-      ${o.kind === "focus" ? `<p>«${esc(a ? a.name : "Занятие")}» — записано <b class="num">${fmt(o.dur)}</b>.</p>` : ""}
+      ${o.kind === "focus" ? viewOverlayLog(o, a) : ""}
       ${sg ? `<div class="nextbox"><span class="label">${nx.isBreak ? "Можно в перерыв" : "Дальше"}</span><div style="font-size:18px;font-weight:600">${esc(sg.area.name)}</div><div class="small muted">${esc(sg.why)}</div></div>` : ""}
       <div class="btn-row">
         ${sg ? (nx.isBreak
@@ -960,7 +995,7 @@ function toast(msg){
   let el = $(".toast"); if (!el){ el = document.createElement("div"); el.className = "toast"; el.setAttribute("role","status"); document.body.appendChild(el); }
   el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { el.hidden = true; }, 2800);
 }
-function closeOverlay(){ overlay = null; guard = null; document.title = "Колесо недели"; render(); }
+function closeOverlay(){ overlay = null; guard = null; splitId = null; document.title = "Колесо недели"; render(); }
 function nextColor(){ const used = new Set(state.areas.map(a => a.color)); return COLORS.find(c => !used.has(c)) || COLORS[state.areas.length % COLORS.length]; }
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-act]"); if (!b || b.disabled) return;
@@ -973,6 +1008,15 @@ document.addEventListener("click", e => {
     case "start-ret": startTimer(aid, W().brk, "focus", 0, true); break;
     case "start-work": { const wa = workArea(); if (wa) startTimer(wa.id, W().block, "focus", 0, false); break; }
     case "unpick": picked = null; render(); break;
+    case "split-open": { splitId = id; render(); const els = document.querySelectorAll('[data-split="min"]'), el = els[els.length - 1]; if (el){ el.focus(); el.select(); } break; }
+    case "split-cancel": splitId = null; render(); break;
+    case "split-do": {
+      const box = b.closest(".split"), r = box && splitLog(id, box.querySelector('[data-split="area"]').value, box.querySelector('[data-split="min"]').value);
+      if (!r){ toast("Укажите минуты: от 1 до " + Math.max(1, ((state.logs.find(x => x.id === id) || {}).m || 2) - 1)); break; }
+      if (overlay && overlay.log === id) overlay.parts.push(r);
+      splitId = null; save(); render(); syncSoon();
+      toast(`Разделено: «${areaById(r.a).name}» — ${fmt(r.m)}`); break;
+    }
     case "start-picked": { const v = $("#pick-area").value, a = areaById(v); if (a) requestStart(v, a.kind === "work" ? W().block : state.settings.block); break; }
     case "extend": {
       const a = areaById(aid); if (!a) break;

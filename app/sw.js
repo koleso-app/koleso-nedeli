@@ -1,6 +1,6 @@
 // Offline cache for the phone version. Only the app's own files are cached;
 // requests to GitHub (sync) always go to the network and are never stored.
-const CACHE = "koleso-v4";
+const CACHE = "koleso-v5";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "sync.js", "manifest.webmanifest", "fonts/fonts.css",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 

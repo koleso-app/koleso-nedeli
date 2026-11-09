@@ -126,6 +126,17 @@ const base = () => ({ v: 2, started: true, areas: [{ id: "en", name: "Англи
     assert.equal(S.merge(pc, phone).logs[0].m, 20);
     assert.equal(S.merge(phone, pc).logs[0].m, 20);
   });
+  await test("a split block stays split when another device finishes the same timer late", async () => {
+    const pc = base(), phone = base();
+    // PC: 50-min work block split into 40 work + 10 game; phone wakes up later and logs the full 50 min
+    pc.logs.push({ id: "t3000", a: "en", d: "2026-11-09", m: 40 }, { id: "sabc", a: "dev", d: "2026-11-09", m: 10 });
+    pc.meta.u["l:t3000"] = 9000; pc.meta.u["l:sabc"] = 9000;
+    phone.logs.push({ id: "t3000", a: "en", d: "2026-11-09", m: 50 }); phone.meta.u["l:t3000"] = 9500;
+    for (const m of [S.merge(pc, phone), S.merge(phone, pc)]) {
+      assert.equal(m.logs.reduce((s, l) => s + l.m, 0), 50);
+      assert.equal(m.logs.find(l => l.id === "t3000").m, 40);
+    }
+  });
   await test("a timer entry moved to another activity keeps the move and the shorter length", async () => {
     const pc = base(), phone = base();
     // the phone still has the old copy; on the PC the entry was moved to "dev" afterwards
